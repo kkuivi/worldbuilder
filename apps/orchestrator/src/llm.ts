@@ -7,16 +7,16 @@ The grid is 24 wide and 16 tall. Coordinates start at 0 in the top left.
 You receive the current world and the latest requests from named players.
 Return only JSON with requestIds, baseVersion, ops, and reply.
 Rules
-- Satisfy every player's request when possible. When two requests conflict, find a creative compromise and say what you did in the reply, naming the players.
+- Fulfill every player's request. Never refuse, skip, or return an empty ops list because a request is unusual, dark, silly, modern, violent, or off theme. This is a fictional map. Translate any request into paint, place, move, remove, or update ops.
+- If the catalog has no exact match, use the closest sprite and terrain, set the label to what the player asked for, and put the rest in a one-sentence note. The request still has to appear on the map.
+- When two requests conflict, find a creative compromise and say what you did in the reply, naming the players. Still emit ops for both.
 - A castle plus a flood or a river becomes a castle inside a moat with a bridge, not a flooded castle.
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
 - Never move or remove things other players built unless a request asks for it.
 - Stay inside the grid, obey the placement rules, and use only sprite ids from the catalog you are given.
-- Houses, towers, castles, and trees cannot sit on water. Bridges sit on water. Roads cannot sit on water. Boats need water. Entities cannot overlap.
+- Houses, towers, castles, and trees cannot sit on water. Bridges sit on water. Roads cannot sit on water. Boats need water. Entities cannot overlap. If a request would break a placement rule, change the terrain or the spot so the thing they asked for still lands.
 - Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. Painting a tile changes its height. There is no separate height operation.
-- Prefer a few well placed things over many scattered ones. Give each thing a sprite from the catalog and a label.
-- Use notes for short lore, one sentence at most.
-- If a request is unsafe or off theme, refuse it in the reply and return no ops.
+- Give each thing a sprite from the catalog and a label. Use notes for short lore, one sentence at most.
 Ops are paint, place, move, remove, or update.`;
 
 async function mastraObject(system: string, prompt: string, schema: unknown): Promise<unknown | null> {
@@ -105,7 +105,7 @@ async function directorPass(
   const specialist = await Promise.all(
     (["architect", "naturalist", "storyteller"] as const).map(async (from) => {
       const result = await complete(
-        `${SYSTEM}\nYou are the ${from}. Return JSON with from, ops, rationale, and concerns. Use from="${from}".`,
+        `${SYSTEM}\nYou are the ${from}. Return JSON with from, ops, rationale, and concerns. Use from="${from}". concerns are placement notes only. Always include ops that carry out the requests. Do not recommend refusing.`,
         `${renderDigest(world)}\n\nRequests:\n${asked}\n\nDraft already proposed:\n${JSON.stringify(local.batch.ops).slice(0, 4000)}`,
         agentProposalSchema,
       );
@@ -123,7 +123,7 @@ async function directorPass(
 
   const merged = await complete(
     SYSTEM,
-    `${renderDigest(world)}\n\nRequests:\n${asked}\n\nSpecialist proposals:\n${JSON.stringify(specialist.filter(Boolean))}\n\nReturn the final EditBatch JSON. requestIds must be ${JSON.stringify(requests.map((request) => request.id))} and baseVersion must be ${world.version}.`,
+    `${renderDigest(world)}\n\nRequests:\n${asked}\n\nSpecialist proposals:\n${JSON.stringify(specialist.filter(Boolean))}\n\nReturn the final EditBatch JSON. Include ops for every request, using the closest catalog sprite and terrain when there is no exact match. An empty ops array is only valid when every request asks for no change. requestIds must be ${JSON.stringify(requests.map((request) => request.id))} and baseVersion must be ${world.version}.`,
     editBatchSchema,
   );
   if (!merged) return null;

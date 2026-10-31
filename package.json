@@ -4,6 +4,7 @@
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"bun run --cwd apps/orchestrator dev\" \"bun run --cwd apps/web dev\"",
+    "build": "bun run --cwd apps/web build",
     "start": "bun run apps/orchestrator/src/index.ts",
     "smoke": "bun test packages/engine/src/room.test.ts",
     "typecheck": "tsc -p apps/web/tsconfig.json --noEmit && tsc -p packages/engine/tsconfig.json --noEmit && tsc -p apps/orchestrator/tsconfig.json --noEmit"
@@ -15,5 +16,8 @@
     "bun-types": "^1.4.4",
     "concurrently": "^9.1.2",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "terse-sdk": "^0.12.3"
   }
 }

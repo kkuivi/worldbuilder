@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "shared-world-builder",
+      "dependencies": {
+        "terse-sdk": "^0.12.3",
+      },
       "devDependencies": {
         "@types/qrcode": "^1.5.5",
         "@types/react": "^19.1.2",

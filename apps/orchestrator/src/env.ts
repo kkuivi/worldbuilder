@@ -26,5 +26,6 @@ export const env = {
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   relayKey: process.env.RELAY_API_KEY || process.env.RELAY_WORKSPACE || "",
-  dataFile: resolve(root, ".data/rooms.json"),
+  dataFile: process.env.DATA_FILE ? resolve(process.env.DATA_FILE) : resolve(root, ".data/rooms.json"),
+  webRoot: resolve(root, "apps/web/dist"),
 };

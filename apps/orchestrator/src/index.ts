@@ -1,4 +1,6 @@
+import { existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
+import { resolve, sep } from "node:path";
 import type { Player, WorldState } from "@worldbuilder/contracts";
 import { PLAYER_COLORS } from "@worldbuilder/contracts";
 import { WorldRoom, type RoomDump } from "@worldbuilder/engine";
@@ -265,6 +267,11 @@ Bun.serve<SocketData>({
       return upgraded ? undefined : json({ error: "websocket upgrade failed" }, 400);
     }
 
+    if (!url.pathname.startsWith("/api") && url.pathname !== "/health") {
+      const page = serveWeb(url);
+      if (page) return page;
+    }
+
     return route(request, url);
   },
   websocket: {
@@ -287,6 +294,31 @@ Bun.serve<SocketData>({
     },
   },
 });
+
+function serveWeb(url: URL): Response | null {
+  const indexPath = resolve(env.webRoot, "index.html");
+  if (!existsSync(indexPath)) return null;
+
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    return new Response("not found", { status: 400 });
+  }
+  const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const target = resolve(env.webRoot, relative);
+  const rootPrefix = env.webRoot.endsWith(sep) ? env.webRoot : `${env.webRoot}${sep}`;
+  if (target !== env.webRoot && !target.startsWith(rootPrefix)) return new Response("not found", { status: 404 });
+
+  if (existsSync(target) && statSync(target).isFile()) {
+    const headers = new Headers();
+    if (relative.startsWith("assets/")) headers.set("cache-control", "public, max-age=31536000, immutable");
+    if (relative === "index.html") headers.set("cache-control", "no-cache");
+    return new Response(Bun.file(target), { headers });
+  }
+  if (relative.includes(".")) return new Response("not found", { status: 404 });
+  return new Response(Bun.file(indexPath), { headers: { "cache-control": "no-cache" } });
+}
 
 async function route(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/health") return json({ ok: true });
