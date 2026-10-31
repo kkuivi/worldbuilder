@@ -1,4 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["src/actor.ts", "apps/actor/src/**/*.ts", "packages/*/src/**/*.ts"]
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src/actor.ts", "apps/actor/src/**/*.ts", "packages/*/src/**/*.ts"],
+  "exclude": ["packages/*/src/**/*.test.ts"]
 }

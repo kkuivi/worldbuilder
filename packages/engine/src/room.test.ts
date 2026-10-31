@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TERRAIN_HEIGHT, renderDigest } from "@worldbuilder/contracts";
-import { planBatch } from "./plan";
-import { WorldRoom } from "./room";
+import { planBatch } from "./plan.js";
+import { WorldRoom } from "./room.js";
 
 function named(room: WorldRoom, requests: Array<{ id: string; playerId: string; text: string }>) {
   const world = room.view();

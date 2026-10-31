@@ -9,7 +9,7 @@ import {
   type Terrain,
   type WorldState,
 } from "@worldbuilder/contracts";
-import { applyOps, placementError } from "./apply";
+import { applyOps, placementError } from "./apply.js";
 
 export interface PlanRequest {
   id: string;

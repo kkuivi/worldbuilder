@@ -1,4 +1,4 @@
-import type { EntityKind } from "./types";
+import type { EntityKind } from "./types.js";
 
 export const TILE_PX = 16;
 

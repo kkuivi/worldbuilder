@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { SPRITE_IDS } from "./sprites";
-import { ENTITY_KINDS, TERRAINS } from "./types";
+import { SPRITE_IDS } from "./sprites.js";
+import { ENTITY_KINDS, TERRAINS } from "./types.js";
 
 export const terrainSchema = z.enum(TERRAINS);
 export const entityKindSchema = z.enum(ENTITY_KINDS);

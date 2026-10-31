@@ -1,5 +1,5 @@
-import { SPRITES, type SpriteId } from "./sprites";
-import { TERRAIN_HEIGHT, type Terrain, type WorldState } from "./types";
+import { SPRITES, type SpriteId } from "./sprites.js";
+import { TERRAIN_HEIGHT, type Terrain, type WorldState } from "./types.js";
 
 const TERRAIN_CHAR: Record<Terrain, string> = {
   grass: ".",

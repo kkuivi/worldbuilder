@@ -1,1 +1,1 @@
-export { WorldRoom } from "../apps/actor/src/world-room";
+export { WorldRoom } from "../apps/actor/src/world-room.js";

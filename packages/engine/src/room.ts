@@ -10,7 +10,7 @@ import type {
   WorldState,
 } from "@worldbuilder/contracts";
 import { GRID_H, GRID_W } from "@worldbuilder/contracts";
-import { applyOps } from "./apply";
+import { applyOps } from "./apply.js";
 
 export interface QueuedRequest extends PlayerRequest {
   status: "pending" | "claimed" | "done";

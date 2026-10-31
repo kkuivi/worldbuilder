@@ -1,4 +1,4 @@
-import type { SpriteId } from "./sprites";
+import type { SpriteId } from "./sprites.js";
 
 export const GRID_W = 24;
 export const GRID_H = 16;
