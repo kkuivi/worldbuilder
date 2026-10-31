@@ -4,6 +4,8 @@ Several people share one map. Each person talks to the builder in chat, and the 
 
 A room is a 24 by 16 grid. Terrain has height: water sits lowest, then sand, dirt, grass, snow, and stone. Players can place houses, trees, castles, rivers, roads, and the rest of the sprite catalog by asking in plain language.
 
+A live copy is at https://worldbuilder-4vna.onrender.com.
+
 ## Run it
 
 You need [Bun](https://bun.sh).
