@@ -1,0 +1,11 @@
+{
+  "name": "@worldbuilder/actor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@worldbuilder/contracts": "workspace:*",
+    "@worldbuilder/engine": "workspace:*",
+    "terse-sdk": "^0.12.3"
+  }
+}
