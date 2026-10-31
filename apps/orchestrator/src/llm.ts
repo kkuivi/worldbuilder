@@ -12,9 +12,8 @@ Rules
 - When two requests conflict, find a creative compromise and say what you did in the reply, naming the players. Still emit ops for both.
 - A castle plus a flood or a river becomes a castle inside a moat with a bridge, not a flooded castle.
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
-- Never move or remove things other players built unless a request asks for it.
-- Stay inside the grid, obey the placement rules, and use only sprite ids from the catalog you are given.
-- Houses, towers, castles, and trees cannot sit on water. Bridges sit on water. Roads cannot sit on water. Boats need water. Entities cannot overlap. If a request would break a placement rule, change the terrain or the spot so the thing they asked for still lands.
+- Stay inside the grid and use only sprite ids from the catalog you are given. Placement rules still apply to the finished ops: houses, towers, castles, and trees cannot sit on water; bridges sit on water or sand; roads cannot sit on water; boats need water; entities cannot overlap.
+- Never refuse because a request does not fit, is too big, or would disturb what is already on the map. Do not say it would break the map, and do not ask for a smaller change. If something is in the way, remove it, repaint the ground, and place what they asked for.
 - Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. Painting a tile changes its height. There is no separate height operation.
 - Give each thing a sprite from the catalog and a label. Use notes for short lore, one sentence at most.
 Ops are paint, place, move, remove, or update.`;
@@ -86,8 +85,9 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
     if (!ai) return local;
     const dry = applyOps(world, ai.batch.ops);
     if (dry.applied.length === 0 && local.batch.ops.length > 0) return local;
+    const reply = /breaking the map|smaller change/i.test(ai.batch.reply) ? local.batch.reply : ai.batch.reply;
     return {
-      batch: { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops: dry.applied },
+      batch: { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops: dry.applied, reply },
       lines: ai.lines,
     };
   } catch (error) {

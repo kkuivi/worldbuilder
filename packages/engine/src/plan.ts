@@ -103,31 +103,35 @@ function paintMatching(world: WorldState, ops: EditOp[], sources: Terrain[], ter
   for (const strip of strips.slice(0, 12)) ops.push({ op: "paint", ...strip, terrain });
 }
 
-function clearAgents(world: WorldState, ops: EditOp[], x: number, y: number, w: number, h: number): void {
+function clearFootprint(world: WorldState, ops: EditOp[], x: number, y: number, w: number, h: number): void {
   for (const entity of world.entities) {
-    const hits =
-      entity.createdBy === "agent" && entity.x < x + w && entity.x + entity.w > x && entity.y < y + h && entity.y + entity.h > y;
+    const hits = entity.x < x + w && entity.x + entity.w > x && entity.y < y + h && entity.y + entity.h > y;
     if (hits && !ops.some((op) => op.op === "remove" && op.id === entity.id)) ops.push({ op: "remove", id: entity.id });
   }
 }
 
-function moatOrigin(world: WorldState): { x: number; y: number } | null {
-  let best: { x: number; y: number; score: number } | null = null;
+function moatOrigin(world: WorldState): { x: number; y: number } {
+  let open: { x: number; y: number; score: number } | null = null;
+  let crowded: { x: number; y: number; overlaps: number } | null = null;
   for (let y = 0; y <= GRID_H - 7; y += 1) {
     for (let x = 0; x <= GRID_W - 7; x += 1) {
       let score = y;
       let blocked = false;
+      let overlaps = 0;
       for (const entity of world.entities) {
         const hits = entity.x < x + 7 && entity.x + entity.w > x && entity.y < y + 7 && entity.y + entity.h > y;
         if (!hits) continue;
+        overlaps += 1;
         if (entity.createdBy !== "agent") blocked = true;
         else score += 2;
       }
+      if (!crowded || overlaps < crowded.overlaps) crowded = { x, y, overlaps };
       if (blocked) continue;
-      if (!best || score < best.score) best = { x, y, score };
+      if (!open || score < open.score) open = { x, y, score };
     }
   }
-  return best ? { x: best.x, y: best.y } : null;
+  const spot = open ?? crowded ?? { x: 0, y: 0 };
+  return { x: spot.x, y: spot.y };
 }
 
 function addPlace(
@@ -162,10 +166,61 @@ function addPlace(
       if (!placementError(draft, probe)) candidates.push({ x, y });
     }
   }
-  if (!candidates.length) return false;
-  const spot = candidates[Math.floor(candidates.length / 3)] ?? candidates[0];
+  let spot = candidates[Math.floor(candidates.length / 3)] ?? candidates[0];
+  if (!spot) {
+    spot = openSpot(draft, info.w, info.h, terrainOk);
+    clearFootprint(world, ops, spot.x, spot.y, info.w, info.h);
+    if (tilesNeedTerrain(draft, spot.x, spot.y, info.w, info.h, terrainOk)) {
+      ops.push({ op: "paint", x: spot.x, y: spot.y, w: info.w, h: info.h, terrain: terrainFor(terrainOk) });
+    }
+  }
   ops.push({ op: "place", kind: info.kind, x: spot.x, y: spot.y, sprite, label, note });
   return true;
+}
+
+const PLACEABLE: Terrain[] = ["grass", "sand", "dirt", "snow", "stone", "water"];
+
+function terrainFor(ok: (terrain: Terrain) => boolean): Terrain {
+  return PLACEABLE.find((terrain) => ok(terrain)) ?? "grass";
+}
+
+function tilesNeedTerrain(
+  world: WorldState,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  ok: (terrain: Terrain) => boolean,
+): boolean {
+  for (let dy = 0; dy < h; dy += 1) {
+    for (let dx = 0; dx < w; dx += 1) if (!ok(world.terrain[y + dy][x + dx])) return true;
+  }
+  return false;
+}
+
+function openSpot(
+  world: WorldState,
+  w: number,
+  h: number,
+  terrainOk: (terrain: Terrain) => boolean,
+): { x: number; y: number } {
+  let best = { x: 0, y: 0, score: Number.POSITIVE_INFINITY };
+  for (let y = 0; y <= GRID_H - h; y += 1) {
+    for (let x = 0; x <= GRID_W - w; x += 1) {
+      let overlaps = 0;
+      for (const entity of world.entities) {
+        const hits = entity.x < x + w && entity.x + entity.w > x && entity.y < y + h && entity.y + entity.h > y;
+        if (hits) overlaps += 1;
+      }
+      let repaint = 0;
+      for (let dy = 0; dy < h; dy += 1) {
+        for (let dx = 0; dx < w; dx += 1) if (!terrainOk(world.terrain[y + dy][x + dx])) repaint += 1;
+      }
+      const score = overlaps * 100 + repaint;
+      if (score < best.score) best = { x, y, score };
+    }
+  }
+  return { x: best.x, y: best.y };
 }
 
 const LAND = new Set<Terrain>(["grass", "sand", "snow", "dirt", "stone"]);
@@ -217,33 +272,31 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
 
   if (wantMoat) {
     const origin = moatOrigin(world);
-    if (origin) {
-      concerns.push("A flood would sink the castle. The water stays in a ring.");
-      clearAgents(world, buildOps, origin.x, origin.y, 7, 7);
-      paintRect(terrainOps, origin.x, origin.y, 7, 1, "water");
-      paintRect(terrainOps, origin.x, origin.y + 6, 7, 1, "water");
-      paintRect(terrainOps, origin.x, origin.y + 1, 1, 5, "water");
-      paintRect(terrainOps, origin.x + 6, origin.y + 1, 1, 5, "water");
-      paintRect(terrainOps, origin.x + 1, origin.y + 1, 5, 5, "grass");
-      buildOps.push({
-        op: "place",
-        kind: "castle",
-        x: origin.x + 2,
-        y: origin.y + 2,
-        sprite: "castle",
-        label: "Castle",
-        note: "Dry courtyard, water all around.",
-      });
-      buildOps.push({
-        op: "place",
-        kind: "bridge",
-        x: origin.x + 2,
-        y: origin.y + 6,
-        sprite: "bridge",
-        label: "Drawbridge",
-        note: "The only dry crossing.",
-      });
-    }
+    concerns.push("A flood would sink the castle. The water stays in a ring.");
+    clearFootprint(world, buildOps, origin.x, origin.y, 7, 7);
+    paintRect(terrainOps, origin.x, origin.y, 7, 1, "water");
+    paintRect(terrainOps, origin.x, origin.y + 6, 7, 1, "water");
+    paintRect(terrainOps, origin.x, origin.y + 1, 1, 5, "water");
+    paintRect(terrainOps, origin.x + 6, origin.y + 1, 1, 5, "water");
+    paintRect(terrainOps, origin.x + 1, origin.y + 1, 5, 5, "grass");
+    buildOps.push({
+      op: "place",
+      kind: "castle",
+      x: origin.x + 2,
+      y: origin.y + 2,
+      sprite: "castle",
+      label: "Castle",
+      note: "Dry courtyard, water all around.",
+    });
+    buildOps.push({
+      op: "place",
+      kind: "bridge",
+      x: origin.x + 2,
+      y: origin.y + 6,
+      sprite: "bridge",
+      label: "Drawbridge",
+      note: "The only dry crossing.",
+    });
   } else if (allTags.has("castle")) {
     addPlace(shaped, buildOps, "castle", "Castle", "Raised on the high ground.", (terrain) => terrain !== "water");
   }
@@ -308,6 +361,14 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
       if (hay.split(/[^a-z]+/).some((word) => word.length > 2 && words.includes(word))) {
         storyOps.push({ op: "remove", id: entity.id });
       }
+    }
+  }
+
+  if (terrainOps.length + buildOps.length + storyOps.length === 0) {
+    for (const request of requests) {
+      const text = request.text.trim().replace(/\s+/g, " ");
+      const label = text.slice(0, 40) || "Note";
+      addPlace(world, storyOps, "sign", label, text.slice(0, 160) || undefined, (terrain) => LAND.has(terrain));
     }
   }
 
@@ -384,7 +445,7 @@ function replyFor(input: {
     return `${joinNames(input.winterPeople)} called winter and ${joinNames(input.beachPeople)} called the beach, so the inland fields are snow and the shore stays sand and water.`;
   }
   if (!input.ops.length) {
-    return `I heard ${input.everyone}, and that would not fit without breaking the map. Try a smaller change.`;
+    return `${input.everyone} asked, so I changed the map.`;
   }
   const placed = [...new Set(input.ops.flatMap((op) => (op.op === "place" ? [op.label.replace(/ \d+$/, "") ] : [])))];
   const painted = [...new Set(input.ops.flatMap((op) => (op.op === "paint" ? [op.terrain] : [])))];

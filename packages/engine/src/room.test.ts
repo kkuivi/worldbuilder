@@ -135,4 +135,26 @@ describe("world room", () => {
     expect(town.view().entities.some((entity) => entity.kind === "house")).toBe(true);
     expect(said.requestId).toBe(batch.requests[0]?.id);
   });
+
+  test("applies a request that does not fit instead of asking for a smaller change", () => {
+    const room = new WorldRoom("FIT");
+    const world = room.start("Wilds");
+    for (const row of world.terrain) row.fill("water");
+    world.entities = [];
+
+    const unmatched = planBatch(world, [
+      { id: "r1", playerId: "a", playerName: "Elikem 2", text: "Put a dragon in the square" },
+    ]);
+    expect(unmatched.batch.reply).not.toMatch(/breaking the map|smaller change/i);
+    expect(unmatched.batch.ops.some((op) => op.op === "place")).toBe(true);
+
+    const castle = planBatch(world, [
+      { id: "r2", playerId: "a", playerName: "Elikem 2", text: "Build a castle" },
+    ]);
+    expect(castle.batch.reply).not.toMatch(/breaking the map|smaller change/i);
+    const applied = room.applyEdits(castle.batch);
+    expect(applied.rejected).toEqual([]);
+    expect(room.view().entities.some((entity) => entity.sprite === "castle")).toBe(true);
+    expect(room.view().chat.at(-1)?.text).toBe(castle.batch.reply);
+  });
 });
