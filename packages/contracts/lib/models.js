@@ -132,6 +132,28 @@ export function airborne(label) {
         return false;
     return /\b(birds?|eagles?|parrots?)\b/i.test(label);
 }
+const FURNITURE = [
+    [/\b(couches|couch|sofas|sofa)\b/i, "Couch"],
+    [/\b(chairs?)\b/i, "Chair"],
+    [/\b(tables?)\b/i, "Table"],
+    [/\b(beds?)\b/i, "Bed"],
+    [/\b(rugs?|carpets?)\b/i, "Rug"],
+    [/\b(lamps?|lanterns?)\b/i, "Lamp"],
+    [/\b(plants?)\b/i, "Plant"],
+    [/\b(bookshelves|bookshelf|bookcases?)\b/i, "Bookshelf"],
+    [/\b(paintings?|pictures?)\b/i, "Painting"],
+    [/\b(desks?)\b/i, "Desk"],
+];
+export function furnitureNames(text) {
+    const found = [];
+    for (const [pattern, label] of FURNITURE)
+        if (pattern.test(text) && !found.includes(label))
+            found.push(label);
+    return found;
+}
+export function isFurniture(label) {
+    return FURNITURE.some(([pattern]) => pattern.test(label));
+}
 function animalBody(label) {
     for (const [pattern, , body] of ANIMALS)
         if (pattern.test(label))
@@ -312,6 +334,38 @@ function creature(label) {
     }
     return quadruped(label, tint ?? 0x8d5a32, 0x3d342c).join("\n");
 }
+function furnitureModel(label) {
+    const cloth = hex(namedColor(label) ?? 0xc23b3b);
+    const wood = "8d5a32";
+    if (/\b(couches|couch|sofas|sofa)\b/i.test(label)) {
+        return [`box 0.92 0.22 0.4 ${cloth} 0 0.18 0`, `box 0.92 0.32 0.1 ${cloth} 0 0.4 -0.16`, `box 0.12 0.24 0.4 ${cloth} -0.42 0.28 0`, `box 0.12 0.24 0.4 ${cloth} 0.42 0.28 0`].join("\n");
+    }
+    if (/\bchairs?\b/i.test(label)) {
+        return [`box 0.36 0.1 0.36 ${wood} 0 0.28 0`, `box 0.36 0.4 0.08 ${cloth} 0 0.48 -0.14`, `cylinder 0.04 0.28 0 ${wood} -0.12 0.14 -0.12`, `cylinder 0.04 0.28 0 ${wood} 0.12 0.14 -0.12`, `cylinder 0.04 0.28 0 ${wood} -0.12 0.14 0.12`, `cylinder 0.04 0.28 0 ${wood} 0.12 0.14 0.12`].join("\n");
+    }
+    if (/\btables?\b/i.test(label)) {
+        return [`box 0.7 0.08 0.46 ${wood} 0 0.42 0`, `cylinder 0.04 0.4 0 ${wood} -0.26 0.2 -0.16`, `cylinder 0.04 0.4 0 ${wood} 0.26 0.2 -0.16`, `cylinder 0.04 0.4 0 ${wood} -0.26 0.2 0.16`, `cylinder 0.04 0.4 0 ${wood} 0.26 0.2 0.16`].join("\n");
+    }
+    if (/\bbeds?\b/i.test(label)) {
+        return [`box 0.7 0.16 0.95 ${wood} 0 0.16 0`, `box 0.6 0.12 0.78 f7f4ee 0 0.28 0.04`, `box 0.42 0.1 0.18 ${cloth} 0 0.38 -0.32`].join("\n");
+    }
+    if (/\b(rugs?|carpets?)\b/i.test(label)) {
+        return [`box 0.9 0.04 0.7 ${cloth} 0 0.04 0`, `box 0.7 0.02 0.5 f7f4ee 0 0.07 0`].join("\n");
+    }
+    if (/\b(lamps?|lanterns?)\b/i.test(label)) {
+        return [`cylinder 0.04 0.46 0 5c3a22 0 0.24 0`, `cone 0.16 0.18 0 ${cloth} 0 0.54 0`, `sphere 0.06 0 0 f4f1c8 0 0.46 0`].join("\n");
+    }
+    if (/\bplants?\b/i.test(label)) {
+        return ["cylinder 0.12 0.16 0 c48945 0 0.1 0", "sphere 0.2 0 0 2f8f3a 0 0.32 0", "sphere 0.12 0 0 3e9a48 0.12 0.42 0"].join("\n");
+    }
+    if (/\b(bookshelves|bookshelf|bookcases?)\b/i.test(label)) {
+        return [`box 0.7 0.7 0.16 ${wood} 0 0.38 0`, "box 0.5 0.06 0.08 c23b3b 0 0.52 0.06", "box 0.4 0.06 0.08 3b6fe0 0 0.28 0.06"].join("\n");
+    }
+    if (/\b(paintings?|pictures?)\b/i.test(label)) {
+        return [`box 0.08 0.5 0.4 ${wood} 0 0.55 0`, `box 0.04 0.38 0.3 ${cloth} 0 0.55 0.04`].join("\n");
+    }
+    return [`box 0.7 0.08 0.4 ${wood} 0 0.42 0`, `cylinder 0.04 0.4 0 ${wood} -0.24 0.2 -0.12`, `cylinder 0.04 0.4 0 ${wood} 0.24 0.2 -0.12`, `cylinder 0.04 0.4 0 ${wood} -0.24 0.2 0.12`, `cylinder 0.04 0.4 0 ${wood} 0.24 0.2 0.12`].join("\n");
+}
 export function inventModel(label) {
     const name = label.trim().toLowerCase();
     const tint = namedColor(label);
@@ -319,6 +373,8 @@ export function inventModel(label) {
         return treeModel(label);
     if (animalBody(label))
         return creature(label);
+    if (isFurniture(label))
+        return furnitureModel(label);
     if (portrayal(label) === "building")
         return building(tint ?? 0x8d3a32, tint ?? 0xc48945);
     const color = hex(tint ?? PALETTE[hashLabel(name) % PALETTE.length] ?? 0xc48945);
@@ -326,7 +382,7 @@ export function inventModel(label) {
     return [`box 0.46 0.36 0.4 ${color} 0 0.28 0`, `sphere 0.16 0 0 ${accent} 0 0.58 0`, "box 0.18 0.08 0.14 3d342c 0 0.12 0.16"].join("\n");
 }
 export function modelFor(label, supplied) {
-    if (portrayal(label) !== "custom")
+    if (portrayal(label) !== "custom" || isFurniture(label))
         return inventModel(label);
     const parsed = supplied ? parseModel(supplied) : null;
     const onlyBoxes = parsed?.every((part) => part.shape === "box") ?? false;

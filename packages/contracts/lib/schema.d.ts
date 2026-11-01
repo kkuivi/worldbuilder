@@ -44,6 +44,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     label: z.ZodString;
     note: z.ZodOptional<z.ZodString>;
     model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+    inside: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     op: "place";
     x: number;
@@ -55,6 +56,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     w?: number | undefined;
     note?: string | undefined;
     model?: string | undefined;
+    inside?: string | undefined;
 }, {
     op: "place";
     x: number;
@@ -66,6 +68,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     w?: number | undefined;
     note?: string | undefined;
     model?: unknown;
+    inside?: string | undefined;
 }>, z.ZodObject<{
     op: z.ZodLiteral<"move">;
     id: z.ZodString;
@@ -156,6 +159,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label: z.ZodString;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+        inside: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         op: "place";
         x: number;
@@ -167,6 +171,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        inside?: string | undefined;
     }, {
         op: "place";
         x: number;
@@ -178,6 +183,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
+        inside?: string | undefined;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"move">;
         id: z.ZodString;
@@ -249,6 +255,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        inside?: string | undefined;
     } | {
         id: string;
         op: "move";
@@ -290,6 +297,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
+        inside?: string | undefined;
     } | {
         id: string;
         op: "move";
@@ -351,6 +359,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label: z.ZodString;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+        inside: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         op: "place";
         x: number;
@@ -362,6 +371,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        inside?: string | undefined;
     }, {
         op: "place";
         x: number;
@@ -373,6 +383,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
+        inside?: string | undefined;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"move">;
         id: z.ZodString;
@@ -443,6 +454,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        inside?: string | undefined;
     } | {
         id: string;
         op: "move";
@@ -484,6 +496,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
+        inside?: string | undefined;
     } | {
         id: string;
         op: "move";

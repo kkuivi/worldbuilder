@@ -1,5 +1,7 @@
 export const GRID_W = 24;
 export const GRID_H = 16;
+export const ROOM_W = 8;
+export const ROOM_H = 6;
 export const TERRAINS = ["grass", "water", "sand", "stone", "snow", "dirt"];
 export const SKIES = ["day", "night"];
 /** Surface height in world units. Water is the basin and stone is the hill. */
@@ -26,6 +28,9 @@ export const ENTITY_KINDS = [
     "sign",
     "custom",
 ];
+export function canEnter(entity) {
+    return entity.kind === "house" || entity.kind === "tower" || entity.kind === "castle";
+}
 export const PLAYER_COLORS = [
     "#e85d4c",
     "#ef9f27",

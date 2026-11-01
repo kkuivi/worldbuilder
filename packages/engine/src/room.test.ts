@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { TERRAIN_HEIGHT, airborne, editBatchSchema, inventModel, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
-import { nudgeRejectedPlaces } from "./apply.js";
+import { applyOps, nudgeRejectedPlaces } from "./apply.js";
 import { carryColor, planBatch, supplementProps } from "./plan.js";
 import { WorldRoom } from "./room.js";
 
@@ -351,5 +351,194 @@ describe("world room", () => {
     const parts = parseModel(inventModel("Blue Tree"));
     expect(parts?.some((part) => part.shape === "sphere" && part.color === 0x3b6fe0)).toBe(true);
     expect(parts?.some((part) => part.shape === "cylinder")).toBe(true);
+  });
+
+  test("friends furnish the inside of a building", () => {
+    const room = new WorldRoom("ROOM");
+    const world = room.start("Wilds");
+    let spot: { x: number; y: number } | null = null;
+    for (let y = 0; y < world.terrain.length - 1 && !spot; y += 1) {
+      for (let x = 0; x < (world.terrain[y]?.length ?? 0) - 1; x += 1) {
+        const open =
+          world.terrain[y]?.[x] === "grass" &&
+          world.terrain[y]?.[x + 1] === "grass" &&
+          world.terrain[y + 1]?.[x] === "grass" &&
+          world.terrain[y + 1]?.[x + 1] === "grass" &&
+          !world.entities.some((entity) => x < entity.x + entity.w && x + 2 > entity.x && y < entity.y + entity.h && y + 2 > entity.y);
+        if (open) {
+          spot = { x, y };
+          break;
+        }
+      }
+    }
+    expect(spot).not.toBeNull();
+    const placed = room.applyEdits({
+      requestIds: [],
+      baseVersion: world.version,
+      reply: "a ranch",
+      ops: [{ op: "place", kind: "house", x: spot!.x, y: spot!.y, w: 2, h: 2, sprite: "house_large", label: "Ranch" }],
+    });
+    expect(placed.applied).toBe(1);
+    const ranch = room.view().entities.find((entity) => entity.label === "Ranch");
+    expect(ranch).toBeTruthy();
+    const plan = planBatch(room.view(), [{ id: "r1", playerId: "a", playerName: "elii", text: "add a blue couch", inside: ranch!.id }]);
+    const couch = plan.batch.ops.find((op) => op.op === "place" && /couch/i.test(op.label));
+    expect(couch?.op).toBe("place");
+    if (couch?.op !== "place") return;
+    expect(couch.inside).toBe(ranch!.id);
+    expect(couch.label).toMatch(/blue/i);
+    expect(couch.x).toBeGreaterThanOrEqual(0);
+    expect(couch.x).toBeLessThan(8);
+    expect(couch.y).toBeGreaterThanOrEqual(0);
+    expect(couch.y).toBeLessThan(6);
+    room.applyEdits({ ...plan.batch, requestIds: [], baseVersion: room.view().version });
+    const furniture = room.view().entities.find((entity) => /couch/i.test(entity.label));
+    expect(furniture?.inside).toBe(ranch!.id);
+    const outside = room.view().entities.filter((entity) => !entity.inside).length;
+    room.applyEdits({
+      requestIds: [],
+      baseVersion: room.view().version,
+      reply: "the ranch is gone",
+      ops: [{ op: "remove", id: ranch!.id }],
+    });
+    expect(room.view().entities.some((entity) => entity.inside === ranch!.id)).toBe(false);
+    expect(room.view().entities.length).toBe(outside - 1);
+  });
+
+  test("a player can slide an object onto an open tile", () => {
+    const room = new WorldRoom("SLIDE");
+    const world = room.start("Wilds");
+    let spot: { x: number; y: number } | null = null;
+    for (let y = 0; y < world.terrain.length && !spot; y += 1) {
+      for (let x = 0; x < (world.terrain[y]?.length ?? 0) - 1; x += 1) {
+        const open =
+          world.terrain[y]?.[x] === "grass" &&
+          world.terrain[y]?.[x + 1] === "grass" &&
+          !world.entities.some((entity) => x < entity.x + entity.w && x + 2 > entity.x && y < entity.y + entity.h && y + 1 > entity.y);
+        if (open) spot = { x, y };
+      }
+    }
+    expect(spot).not.toBeNull();
+    room.applyEdits({
+      requestIds: [],
+      baseVersion: world.version,
+      reply: "a crate",
+      ops: [{ op: "place", kind: "custom", x: spot!.x, y: spot!.y, sprite: "prop", label: "Crate" }],
+    });
+    const crate = room.view().entities.find((entity) => entity.label === "Crate");
+    expect(crate).toBeTruthy();
+    const version = room.view().version;
+    const lines = room.view().chat.length;
+    const blocked = room.relocate(crate!.id, spot!.x, spot!.y);
+    expect(blocked.ok).toBe(true);
+    expect(room.view().version).toBe(version);
+    const moved = room.relocate(crate!.id, spot!.x + 1, spot!.y);
+    expect(moved.ok).toBe(true);
+    expect(room.view().entities.find((entity) => entity.id === crate!.id)?.x).toBe(spot!.x + 1);
+    expect(room.view().chat.length).toBe(lines);
+    const tree = room.view().entities.find((entity) => entity.kind === "tree");
+    expect(tree).toBeTruthy();
+    const rejected = room.relocate(crate!.id, tree!.x, tree!.y);
+    expect(rejected.ok).toBe(false);
+    expect(room.view().entities.find((entity) => entity.id === crate!.id)?.x).toBe(spot!.x + 1);
+  });
+
+  test("chat changes the object the player selected", () => {
+    const room = new WorldRoom("EDIT");
+    const world = room.start("Wilds");
+    let spot: { x: number; y: number } | null = null;
+    for (let y = 0; y < world.terrain.length && !spot; y += 1) {
+      for (let x = 0; x < world.terrain[y]!.length; x += 1) {
+        if (world.terrain[y]?.[x] === "grass" && !world.entities.some((entity) => x < entity.x + entity.w && x + 1 > entity.x && y < entity.y + entity.h && y + 1 > entity.y)) {
+          spot = { x, y };
+        }
+      }
+    }
+    room.applyEdits({
+      requestIds: [],
+      baseVersion: world.version,
+      reply: "a couch",
+      ops: [{ op: "place", kind: "custom", x: spot!.x, y: spot!.y, sprite: "prop", label: "Couch" }],
+    });
+    const couch = room.view().entities.find((entity) => entity.label === "Couch");
+    expect(couch).toBeTruthy();
+    const painted = planBatch(room.view(), [{ id: "r1", playerId: "a", playerName: "elii", text: "make it blue", focus: couch!.id }]);
+    const update = painted.batch.ops.find((op) => op.op === "update");
+    expect(update?.op).toBe("update");
+    if (update?.op !== "update") return;
+    expect(update.id).toBe(couch!.id);
+    expect(update.label).toBe("Blue Couch");
+    expect(painted.batch.ops.some((op) => op.op === "place")).toBe(false);
+    const swapped = planBatch(room.view(), [{ id: "r2", playerId: "a", playerName: "elii", text: "turn it into a lamp", focus: couch!.id }]);
+    const lamp = swapped.batch.ops.find((op) => op.op === "update");
+    expect(lamp?.op === "update" && lamp.label).toBe("Lamp");
+    const added = planBatch(room.view(), [{ id: "r3", playerId: "a", playerName: "elii", text: "add a rug", focus: couch!.id }]);
+    expect(added.batch.ops.some((op) => op.op === "place" && /rug/i.test(op.label))).toBe(true);
+    expect(added.batch.ops.some((op) => op.op === "update")).toBe(false);
+  });
+
+  test("a selected tile is where the next object is built", () => {
+    const room = new WorldRoom("TILE");
+    const world = room.start("Wilds");
+    const open = (terrain: string) => {
+      for (let y = 0; y < world.terrain.length - 1; y += 1) {
+        for (let x = 0; x < world.terrain[y]!.length; x += 1) {
+          const clear = !world.entities.some((entity) => !entity.inside && x < entity.x + entity.w && x + 1 > entity.x && y < entity.y + entity.h && y + 2 > entity.y);
+          if (clear && world.terrain[y]?.[x] === terrain && world.terrain[y + 1]?.[x] === terrain) return { x, y };
+        }
+      }
+      return null;
+    };
+    const grass = open("grass");
+    expect(grass).toBeTruthy();
+    const planned = planBatch(world, [{ id: "r1", playerId: "a", playerName: "elii", text: "add a campfire", spot: grass! }]);
+    const fire = planned.batch.ops.find((op) => op.op === "place" && /campfire/i.test(op.label));
+    expect(fire?.op === "place" && fire.x === grass!.x && fire.y === grass!.y).toBe(true);
+    const applied = applyOps(world, planned.batch.ops);
+    expect(applied.rejected).toEqual([]);
+    expect(applied.world.entities.some((entity) => entity.x === grass!.x && entity.y === grass!.y && /campfire/i.test(entity.label))).toBe(true);
+
+    const water = open("water");
+    if (water) {
+      const wet = planBatch(world, [{ id: "r2", playerId: "a", playerName: "elii", text: "add a tree", spot: water }]);
+      const tree = wet.batch.ops.find((op) => op.op === "place" && /oak|tree|pine/i.test(op.label));
+      expect(tree?.op === "place" && tree.x === water.x && tree.y === water.y).toBe(true);
+      expect(wet.batch.ops.some((op) => op.op === "paint" && op.x === water.x && op.y === water.y && op.terrain === "grass")).toBe(true);
+      expect(applyOps(world, wet.batch.ops).rejected).toEqual([]);
+    }
+  });
+
+  test("a selected area keeps the road and the houses inside it", () => {
+    const room = new WorldRoom("AREA");
+    const world = room.start("Wilds");
+    const free = (x: number, y: number, w: number, h: number) => {
+      for (let dy = 0; dy < h; dy += 1) {
+        for (let dx = 0; dx < w; dx += 1) {
+          if (world.terrain[y + dy]?.[x + dx] !== "grass") return false;
+        }
+      }
+      return true;
+    };
+    let line: { x: number; y: number } | null = null;
+    for (let y = 0; y < world.terrain.length && !line; y += 1) {
+      for (let x = 0; x <= 18; x += 1) if (free(x, y, 6, 1)) line = { x, y };
+    }
+    expect(line).toBeTruthy();
+    const road = planBatch(world, [{ id: "r1", playerId: "a", playerName: "elii", text: "add a road", spot: { x: line!.x, y: line!.y, w: 6, h: 1 } }]);
+    const roads = road.batch.ops.filter((op) => op.op === "place" && op.sprite === "road");
+    expect(roads).toHaveLength(6);
+    expect(roads.every((op) => op.op === "place" && op.y === line!.y && op.x >= line!.x && op.x < line!.x + 6)).toBe(true);
+    expect(applyOps(world, road.batch.ops).rejected).toEqual([]);
+
+    let block: { x: number; y: number } | null = null;
+    for (let y = 0; y <= 12 && !block; y += 1) {
+      for (let x = 0; x <= 18; x += 1) if (free(x, y, 6, 4)) block = { x, y };
+    }
+    expect(block).toBeTruthy();
+    const homes = planBatch(world, [{ id: "r2", playerId: "a", playerName: "elii", text: "add a neighborhood", spot: { x: block!.x, y: block!.y, w: 6, h: 4 } }]);
+    const houses = homes.batch.ops.filter((op) => op.op === "place" && op.sprite === "house_small");
+    expect(houses.length).toBeGreaterThan(1);
+    expect(houses.every((op) => op.op === "place" && op.x >= block!.x && op.y >= block!.y && op.x + 2 <= block!.x + 6 && op.y + 2 <= block!.y + 4)).toBe(true);
+    expect(applyOps(world, homes.batch.ops).rejected).toEqual([]);
   });
 });

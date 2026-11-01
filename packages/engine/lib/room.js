@@ -1,5 +1,18 @@
-import { GRID_H, GRID_W } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, ROOM_H, ROOM_W, canEnter } from "@worldbuilder/contracts";
 import { applyOps } from "./apply.js";
+function cleanSpot(spot, inside) {
+    if (!spot || !Number.isInteger(spot.x) || !Number.isInteger(spot.y))
+        return undefined;
+    const w = spot.w == null ? 1 : spot.w;
+    const h = spot.h == null ? 1 : spot.h;
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1)
+        return undefined;
+    const width = inside ? ROOM_W : GRID_W;
+    const height = inside ? ROOM_H : GRID_H;
+    if (spot.x < 0 || spot.y < 0 || spot.x + w > width || spot.y + h > height)
+        return undefined;
+    return { x: spot.x, y: spot.y, w, h };
+}
 const LEASE_MS = 30_000;
 const MAX_CHAT = 100;
 const MAX_EVENTS = 200;
@@ -175,7 +188,18 @@ export class WorldRoom {
         }
         return this.view();
     }
-    say(playerId, text) {
+    locate(playerId, inside) {
+        const world = this.require();
+        const player = world.players.find((item) => item.id === playerId);
+        if (!player)
+            return;
+        const next = inside && world.entities.some((entity) => entity.id === inside && canEnter(entity)) ? inside : undefined;
+        if (player.inside === next)
+            return;
+        player.inside = next;
+        this.emit("player_joined", { player: { ...player } });
+    }
+    say(playerId, text, inside, focus, spot) {
         const world = this.require();
         const player = world.players.find((item) => item.id === playerId);
         if (!player)
@@ -200,6 +224,9 @@ export class WorldRoom {
             playerId,
             text: clean,
             at: message.at,
+            inside,
+            focus: focus && world.entities.some((entity) => entity.id === focus) ? focus : undefined,
+            spot: cleanSpot(spot, inside),
             status: "pending",
         });
         this.emit("chat", { message });
@@ -222,6 +249,42 @@ export class WorldRoom {
             baseVersion: this.world.version,
             leaseUntil,
         };
+    }
+    relocate(id, x, y) {
+        const world = this.require();
+        const entity = world.entities.find((item) => item.id === id);
+        if (!entity)
+            return { ok: false, reason: "that is not on the map" };
+        const nextX = Math.round(x);
+        const nextY = Math.round(y);
+        if (entity.x === nextX && entity.y === nextY)
+            return { ok: true };
+        const result = applyOps(world, [{ op: "move", id, x: nextX, y: nextY }]);
+        if (result.applied.length === 0)
+            return { ok: false, reason: result.rejected[0]?.reason ?? "that spot is taken" };
+        this.world = result.world;
+        this.world.version += 1;
+        const previous = this.world.chat.at(-1);
+        const message = previous ?? {
+            id: this.nextId("msg"),
+            seq: this.seq,
+            at: new Date().toISOString(),
+            from: "Director",
+            role: "agent",
+            text: "",
+        };
+        this.emit("edits", {
+            version: this.world.version,
+            sky: this.world.sky ?? "day",
+            terrain: this.world.terrain,
+            entities: this.world.entities,
+            message,
+            rejected: [],
+            stale: false,
+            colors: [],
+            requestIds: [],
+        });
+        return { ok: true };
     }
     applyEdits(batch, now = Date.now(), options) {
         const world = this.require();

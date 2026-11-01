@@ -1,4 +1,4 @@
-import { GRID_H, GRID_W, SPRITES, isSpriteId, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, ROOM_H, ROOM_W, SPRITES, canEnter, isSpriteId, inventModel, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
 const WATER_FORBIDDEN = new Set(["house", "tower", "castle", "tree"]);
 export function cloneWorld(world) {
     return structuredClone(world);
@@ -19,13 +19,16 @@ function probeEntity(op, x, y) {
         h: op.h ?? sprite.h,
         sprite: op.sprite,
         label,
+        inside: op.inside,
         createdBy: "agent",
     };
 }
 function nearestOpen(world, entity) {
+    const width = entity.inside ? ROOM_W : GRID_W;
+    const height = entity.inside ? ROOM_H : GRID_H;
     let best = null;
-    for (let y = 0; y <= GRID_H - entity.h; y += 1) {
-        for (let x = 0; x <= GRID_W - entity.w; x += 1) {
+    for (let y = 0; y <= height - entity.h; y += 1) {
+        for (let x = 0; x <= width - entity.w; x += 1) {
             if (placementError(world, { ...entity, x, y }))
                 continue;
             const dx = x - entity.x;
@@ -97,6 +100,8 @@ function terrainAt(world, x, y) {
 export function placementError(world, entity, ignoreId) {
     if (!isSpriteId(entity.sprite))
         return `unknown sprite ${entity.sprite}`;
+    if (entity.inside)
+        return interiorError(world, entity, ignoreId);
     if (!inBounds(entity.x, entity.y, entity.w, entity.h))
         return "outside the 24 by 16 grid";
     const tiles = tilesOf(entity.x, entity.y, entity.w, entity.h);
@@ -115,7 +120,18 @@ export function placementError(world, entity, ignoreId) {
     if (entity.kind === "boat" && terrains.every((terrain) => terrain !== "water")) {
         return "boat needs water";
     }
-    const blocker = world.entities.find((other) => other.id !== ignoreId && overlaps(entity, other));
+    const blocker = world.entities.find((other) => !other.inside && other.id !== ignoreId && overlaps(entity, other));
+    if (blocker)
+        return `overlaps ${blocker.label}`;
+    return null;
+}
+function interiorError(world, entity, ignoreId) {
+    const host = world.entities.find((other) => other.id === entity.inside);
+    if (!host || !canEnter(host))
+        return "that building has no interior";
+    if (entity.x < 0 || entity.y < 0 || entity.x + entity.w > ROOM_W || entity.y + entity.h > ROOM_H)
+        return "outside the room";
+    const blocker = world.entities.find((other) => other.inside === entity.inside && other.id !== ignoreId && overlaps(entity, other));
     if (blocker)
         return `overlaps ${blocker.label}`;
     return null;
@@ -173,6 +189,7 @@ function applyOne(world, op, spawned, index) {
             label: op.label.trim(),
             note: op.note?.trim() || undefined,
             model: made.model,
+            inside: op.inside,
             createdBy: "agent",
         };
         if (!entity.label)
@@ -188,7 +205,14 @@ function applyOne(world, op, spawned, index) {
         const indexOf = world.entities.findIndex((entity) => entity.id === op.id);
         if (indexOf < 0)
             return `no entity ${op.id}`;
+        const removed = world.entities[indexOf];
         world.entities.splice(indexOf, 1);
+        if (removed && canEnter(removed)) {
+            for (let i = world.entities.length - 1; i >= 0; i -= 1) {
+                if (world.entities[i]?.inside === removed.id)
+                    world.entities.splice(i, 1);
+            }
+        }
         return null;
     }
     if (op.op === "move") {
@@ -212,6 +236,7 @@ function applyOne(world, op, spawned, index) {
         note: op.note !== undefined ? op.note.trim() || undefined : entity.note,
         sprite: op.sprite ?? entity.sprite,
         kind: op.sprite ? SPRITES[op.sprite].kind : entity.kind,
+        model: op.label?.trim() && op.label.trim() !== entity.label ? inventModel(op.label.trim()) : entity.model,
     };
     if (!next.label)
         return "label cannot be empty";

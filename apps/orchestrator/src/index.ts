@@ -164,6 +164,17 @@ function ensurePlayer(input: Partial<Player> | undefined, fallbackName: string):
   };
 }
 
+function readSpot(value: unknown): { x: number; y: number; w?: number; h?: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const spot = value as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
+  const x = typeof spot.x === "number" ? spot.x : Number.NaN;
+  const y = typeof spot.y === "number" ? spot.y : Number.NaN;
+  if (!Number.isInteger(x) || !Number.isInteger(y)) return undefined;
+  const w = typeof spot.w === "number" && Number.isInteger(spot.w) ? spot.w : undefined;
+  const h = typeof spot.h === "number" && Number.isInteger(spot.h) ? spot.h : undefined;
+  return { x, y, ...(w ? { w } : {}), ...(h ? { h } : {}) };
+}
+
 async function readJson(request: Request): Promise<Record<string, unknown>> {
   if (request.headers.get("content-length") === "0") return {};
   try {
@@ -255,7 +266,7 @@ setInterval(() => {
 function onSocketMessage(socket: BunSocket, raw: string | Buffer): void {
   const room = rooms.get(socket.data.roomId);
   if (!room?.started()) return;
-  let message: { type?: string; player?: Player; playerId?: string; text?: string; since?: number };
+  let message: { type?: string; player?: Player; playerId?: string; text?: string; since?: number; inside?: string; focus?: string; spot?: { x?: number; y?: number; w?: number; h?: number }; id?: string; x?: number; y?: number; token?: string };
   try {
     message = JSON.parse(String(raw));
   } catch {
@@ -269,8 +280,14 @@ function onSocketMessage(socket: BunSocket, raw: string | Buffer): void {
       room.join(player);
       remember(room, meta.get(room.id)?.createdBy ?? player.id);
       socket.send(JSON.stringify({ type: "state", world: room.view(), events: room.eventsSince(0) }));
+    } else if (message.type === "inside" && message.playerId) {
+      room.locate(message.playerId, typeof message.inside === "string" ? message.inside : null);
+    } else if (message.type === "move" && message.playerId && message.id && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+      const moved = room.relocate(message.id, Number(message.x), Number(message.y));
+      if (moved.ok) remember(room, meta.get(room.id)?.createdBy ?? message.playerId);
+      socket.send(JSON.stringify({ type: "move_result", token: message.token, ok: moved.ok, reason: moved.reason }));
     } else if (message.type === "say" && message.playerId && message.text) {
-      room.say(message.playerId, message.text);
+      room.say(message.playerId, message.text, typeof message.inside === "string" ? message.inside : undefined, typeof message.focus === "string" ? message.focus : undefined, readSpot(message.spot));
       remember(room, meta.get(room.id)?.createdBy ?? message.playerId);
     } else if (message.type === "subscribe") {
       socket.send(JSON.stringify({ type: "state", world: room.view(), events: room.eventsSince(message.since ?? 0) }));
@@ -376,7 +393,7 @@ async function route(request: Request, url: URL): Promise<Response> {
     return json({ roomId: id, player, world });
   }
 
-  const match = url.pathname.match(/^\/api\/worlds\/([A-Za-z0-9]{4})(?:\/(join|say|state|watch|socket))?$/);
+  const match = url.pathname.match(/^\/api\/worlds\/([A-Za-z0-9]{4})(?:\/(join|say|state|watch|socket|move))?$/);
   if (!match) return json({ error: "not found" }, 404);
   const id = match[1].toUpperCase();
   const action = match[2] ?? "";
@@ -414,13 +431,29 @@ async function route(request: Request, url: URL): Promise<Response> {
     return json({ player, world: room.view(), events: room.eventsSince(0) });
   }
 
+  if (action === "move" && request.method === "POST") {
+    if (!room?.started()) return json({ error: "world not found" }, 404);
+    const body = await readJson(request);
+    const playerId = typeof body.playerId === "string" ? body.playerId : "";
+    const id = typeof body.id === "string" ? body.id : "";
+    const x = typeof body.x === "number" ? body.x : Number.NaN;
+    const y = typeof body.y === "number" ? body.y : Number.NaN;
+    const before = room.currentSeq();
+    const moved = room.relocate(id, x, y);
+    if (moved.ok) {
+      remember(room, meta.get(id)?.createdBy ?? playerId);
+      broadcast(room, before);
+    }
+    return json({ ...moved, world: room.view() });
+  }
+
   if (action === "say" && request.method === "POST") {
     if (!room?.started()) return json({ error: "world not found" }, 404);
     const body = await readJson(request);
     const playerId = typeof body.playerId === "string" ? body.playerId : "";
     const text = typeof body.text === "string" ? body.text : "";
     const before = room.currentSeq();
-    const said = room.say(playerId, text);
+    const said = room.say(playerId, text, typeof body.inside === "string" ? body.inside : undefined, typeof body.focus === "string" ? body.focus : undefined, readSpot(body.spot));
     remember(room, meta.get(id)?.createdBy ?? playerId);
     watched.add(id);
     broadcast(room, before);

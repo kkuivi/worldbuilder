@@ -34,11 +34,21 @@ export declare class WorldRoom {
     view(): WorldState;
     pendingCount(now?: number): number;
     join(player: Player): WorldState;
-    say(playerId: string, text: string): {
+    locate(playerId: string, inside: string | null): void;
+    say(playerId: string, text: string, inside?: string, focus?: string, spot?: {
+        x: number;
+        y: number;
+        w?: number;
+        h?: number;
+    }): {
         requestId: string;
         message: ChatMessage;
     };
     claimBatch(workerId: string, now?: number): ClaimedBatch | null;
+    relocate(id: string, x: number, y: number): {
+        ok: boolean;
+        reason?: string;
+    };
     applyEdits(batch: EditBatch, now?: number, options?: {
         silent?: boolean;
     }): ApplyResult;

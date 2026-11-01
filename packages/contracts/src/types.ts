@@ -2,6 +2,8 @@ import type { SpriteId } from "./sprites.js";
 
 export const GRID_W = 24;
 export const GRID_H = 16;
+export const ROOM_W = 8;
+export const ROOM_H = 6;
 
 export const TERRAINS = ["grass", "water", "sand", "stone", "snow", "dirt"] as const;
 export type Terrain = (typeof TERRAINS)[number];
@@ -36,6 +38,10 @@ export const ENTITY_KINDS = [
 ] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
+export function canEnter(entity: { kind: EntityKind }): boolean {
+  return entity.kind === "house" || entity.kind === "tower" || entity.kind === "castle";
+}
+
 export interface Entity {
   id: string;
   kind: EntityKind;
@@ -47,6 +53,7 @@ export interface Entity {
   label: string;
   note?: string;
   model?: string;
+  inside?: string;
   createdBy: string;
 }
 
@@ -55,6 +62,7 @@ export interface Player {
   name: string;
   color: string;
   joinedAt: string;
+  inside?: string;
 }
 
 export interface ChatMessage {
@@ -84,6 +92,9 @@ export interface PlayerRequest {
   playerId: string;
   text: string;
   at: string;
+  inside?: string;
+  focus?: string;
+  spot?: { x: number; y: number; w?: number; h?: number };
 }
 
 export type EditOp =
@@ -100,6 +111,7 @@ export type EditOp =
       label: string;
       note?: string;
       model?: string;
+      inside?: string;
     }
   | { op: "move"; id: string; x: number; y: number }
   | { op: "remove"; id: string }

@@ -18,6 +18,8 @@ export declare function coloredNouns(text: string): Array<{
 }>;
 export declare function animalNames(text: string): string[];
 export declare function airborne(label: string): boolean;
+export declare function furnitureNames(text: string): string[];
+export declare function isFurniture(label: string): boolean;
 export declare function portrayal(label: string): Portrayal;
 export declare function inventModel(label: string): string;
 export declare function modelFor(label: string, supplied?: string): string;

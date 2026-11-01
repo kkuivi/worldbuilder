@@ -1,4 +1,4 @@
-import { GRID_H, GRID_W, SPRITES, colorWord, coloredNouns, animalNames, inventModel, portrayal, } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, ROOM_H, ROOM_W, SPRITES, canEnter, colorWord, coloredNouns, animalNames, furnitureNames, inventModel, isFurniture, portrayal, } from "@worldbuilder/contracts";
 import { applyOps, placementError } from "./apply.js";
 const TAGS = [
     [/castle|fortress|keep|palace/, "castle"],
@@ -119,12 +119,445 @@ function mentionedProps(requests) {
     const found = [];
     const text = requests.map((request) => request.text).join(" ");
     for (const [pattern, label] of PROPS)
-        if (pattern.test(text) && !found.includes(label))
+        if (pattern.test(text) && !isFurniture(label) && !found.includes(label))
             found.push(label);
     for (const label of animalNames(text))
         if (!found.includes(label))
             found.push(label);
     return found;
+}
+function hostFor(request, world) {
+    if (request.inside) {
+        const direct = world.entities.find((entity) => entity.id === request.inside && canEnter(entity));
+        if (direct)
+            return direct;
+    }
+    const match = request.text.match(/\b(?:inside|into|in)\s+(?:the\s+)?([a-z0-9][a-z0-9 '-]{0,24})/i);
+    if (!match?.[1])
+        return null;
+    const phrase = (match[1].toLowerCase().split(/\b(?:and|with|so|then)\b/)[0] ?? "").trim();
+    const keys = phrase.split(/[^a-z0-9]+/).filter((word) => word.length > 2);
+    let best = null;
+    for (const entity of world.entities) {
+        if (!canEnter(entity))
+            continue;
+        const hay = `${entity.label} ${entity.kind}`.toLowerCase();
+        let score = 0;
+        for (const key of keys)
+            if (hay.includes(key))
+                score += 2;
+        if (/\b(house|cottage|cabin)\b/.test(phrase) && entity.kind === "house")
+            score += 1;
+        if (score > 0 && (!best || score > best.score))
+            best = { entity, score };
+    }
+    return best?.entity ?? null;
+}
+function roomSpot(world, ops, hostId) {
+    const draft = applyOps(world, ops).world;
+    for (let y = 0; y <= ROOM_H - 1; y += 1) {
+        for (let x = 0; x <= ROOM_W - 1; x += 1) {
+            const probe = {
+                id: "probe",
+                kind: "custom",
+                x,
+                y,
+                w: 1,
+                h: 1,
+                sprite: "prop",
+                label: "Furniture",
+                inside: hostId,
+                createdBy: "agent",
+            };
+            if (!placementError(draft, probe))
+                return { x, y };
+        }
+    }
+    return null;
+}
+function titled(value) {
+    return value
+        .trim()
+        .replace(/\s+/g, " ")
+        .replace(/\b(please|thanks|now)\b/gi, "")
+        .trim()
+        .split(" ")
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(" ")
+        .slice(0, 40);
+}
+function withoutColor(label) {
+    return label.replace(/^(?:red|blue|green|yellow|orange|purple|black|white|golden|gold|silver|pink|brown)\s+/i, "").trim();
+}
+export function wantsFocusEdit(text, entity) {
+    if (skyAsk([{ id: "focus", playerId: "focus", playerName: "focus", text }]))
+        return false;
+    const lower = text.toLowerCase();
+    if (/\b(add|place|put|build|create)\b/.test(lower) && !/\b(it|this|that)\b/.test(lower))
+        return false;
+    if (/\b(it|this|that)\b/.test(lower))
+        return true;
+    const label = entity.label.toLowerCase();
+    if (label.length > 2 && lower.includes(label))
+        return true;
+    return /\b(remove|delete|rename|recolor|repaint)\b/.test(lower);
+}
+function focusEntity(request, world) {
+    if (!request.focus)
+        return null;
+    const entity = world.entities.find((item) => item.id === request.focus);
+    if (!entity || !wantsFocusEdit(request.text, entity))
+        return null;
+    return entity;
+}
+export function focusEdits(entity, text) {
+    if (/\b(remove|delete|erase)\b/i.test(text))
+        return [{ op: "remove", id: entity.id }];
+    let label = entity.label;
+    const called = text.match(/\b(?:rename(?:\s+it)?|call\s+it|name\s+it)\s+(?:to\s+)?["']?([a-z0-9][a-z0-9 '-]{0,30})/i);
+    const swapped = furnitureNames(text)[0] ?? animalNames(text)[0];
+    const into = text.match(/\b(?:into|to)\s+(?:a|an)\s+([a-z][a-z0-9 '-]{1,30})/i);
+    if (called?.[1])
+        label = titled(called[1]);
+    else if (swapped && swapped.toLowerCase() !== withoutColor(entity.label).toLowerCase())
+        label = swapped;
+    else if (into?.[1])
+        label = titled(into[1]);
+    const color = colorWord(text);
+    if (color)
+        label = `${color} ${withoutColor(label)}`.trim();
+    const noted = text.match(/\b(?:add\s+a\s+note|note|story)\s+(?:that\s+|about\s+)?(.{3,140})/i);
+    const note = noted?.[1]?.trim();
+    if (label === entity.label && !note)
+        return [];
+    const next = { op: "update", id: entity.id, label: label.slice(0, 40) };
+    if (note)
+        next.note = note.slice(0, 160);
+    const asTree = portrayal(label) === "tree";
+    const asProp = portrayal(label) === "animal" || isFurniture(label) || (into?.[1] && portrayal(label) === "custom");
+    const sprite = asTree ? (/\bpines?\b/i.test(label) ? "tree_pine" : "tree_oak") : asProp ? "prop" : undefined;
+    if (sprite && sprite !== entity.sprite)
+        return [{ ...next, sprite }];
+    return [next];
+}
+function focusReply(ops) {
+    const lines = ops.map((op) => {
+        if (op.op === "remove")
+            return "I removed the selected piece";
+        if (op.op === "update" && op.label)
+            return `I changed the selection to ${op.label}`;
+        return "";
+    });
+    const text = lines.filter(Boolean).join(". ");
+    return text ? `${text}.` : "";
+}
+export function carryFocus(requests, world, ops) {
+    const edits = requests.flatMap((request) => {
+        const entity = focusEntity(request, world);
+        return entity ? focusEdits(entity, request.text) : [];
+    });
+    if (!edits.length)
+        return ops;
+    const handled = requests.filter((request) => focusEntity(request, world)).length;
+    if (handled === requests.length)
+        return edits.slice(0, 48);
+    const nouns = new Set(requests
+        .filter((request) => focusEntity(request, world))
+        .flatMap((request) => [...furnitureNames(request.text), ...animalNames(request.text)].map((label) => label.toLowerCase())));
+    const kept = ops.filter((op) => {
+        if (op.op !== "place")
+            return true;
+        const label = op.label.toLowerCase();
+        for (const noun of nouns)
+            if (label.includes(noun))
+                return false;
+        return true;
+    });
+    return [...edits, ...kept].slice(0, 48);
+}
+function spotBox(spot, inside) {
+    if (!spot || !Number.isInteger(spot.x) || !Number.isInteger(spot.y))
+        return null;
+    const w = spot.w == null ? 1 : spot.w;
+    const h = spot.h == null ? 1 : spot.h;
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1)
+        return null;
+    const width = inside ? ROOM_W : GRID_W;
+    const height = inside ? ROOM_H : GRID_H;
+    if (spot.x < 0 || spot.y < 0 || spot.x + w > width || spot.y + h > height)
+        return null;
+    return { x: spot.x, y: spot.y, w, h };
+}
+function placeFootprint(op) {
+    const name = op.label.trim();
+    let sprite = op.sprite;
+    if ((sprite === "prop" || sprite === "sign") && portrayal(name) === "tree") {
+        sprite = /\bpines?\b/i.test(name) ? "tree_pine" : "tree_oak";
+    }
+    const info = SPRITES[sprite] ?? SPRITES[op.sprite];
+    return { w: op.w ?? info.w, h: op.h ?? info.h, kind: info.kind };
+}
+function groundFor(kind, terrains) {
+    if (kind === "boat")
+        return terrains.some((terrain) => terrain === "water") ? null : "water";
+    if (kind === "bridge")
+        return terrains.every((terrain) => terrain === "water" || terrain === "sand") ? null : "water";
+    if (kind === "road" && terrains.some((terrain) => terrain === "water"))
+        return "dirt";
+    if ((kind === "house" || kind === "tower" || kind === "castle" || kind === "tree") && terrains.some((terrain) => terrain === "water")) {
+        return "grass";
+    }
+    return null;
+}
+function covers(entity, x, y, w, h) {
+    return entity.x < x + w && entity.x + entity.w > x && entity.y < y + h && entity.y + entity.h > y;
+}
+function placeBelongs(request, op) {
+    const text = request.text.toLowerCase();
+    return op.label
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((word) => word.length > 2)
+        .some((word) => text.includes(word));
+}
+function anchorPlace(world, op, request) {
+    if (!request.spot)
+        return [op];
+    const footprint = placeFootprint(op);
+    const room = request.inside;
+    const width = room ? ROOM_W : GRID_W;
+    const height = room ? ROOM_H : GRID_H;
+    if (footprint.w > width || footprint.h > height)
+        return [op];
+    const x = Math.max(0, Math.min(request.spot.x, width - footprint.w));
+    const y = Math.max(0, Math.min(request.spot.y, height - footprint.h));
+    const { inside: _ignored, ...rest } = op;
+    const placed = room ? { ...rest, x, y, inside: room } : { ...rest, x, y };
+    const prep = [];
+    if (!room) {
+        const terrains = [];
+        for (let dy = 0; dy < footprint.h; dy += 1) {
+            for (let dx = 0; dx < footprint.w; dx += 1) {
+                const terrain = world.terrain[y + dy]?.[x + dx];
+                if (terrain)
+                    terrains.push(terrain);
+            }
+        }
+        const paint = groundFor(footprint.kind, terrains);
+        if (paint)
+            prep.push({ op: "paint", x, y, w: footprint.w, h: footprint.h, terrain: paint });
+    }
+    for (const entity of world.entities) {
+        if (room ? entity.inside !== room : Boolean(entity.inside))
+            continue;
+        if (covers(entity, x, y, footprint.w, footprint.h))
+            prep.push({ op: "remove", id: entity.id });
+    }
+    return [...prep, placed];
+}
+function areaIntent(text) {
+    if (/\b(roads?|paths?|lanes?|streets?)\b/i.test(text))
+        return "road";
+    if (/\b(neighborhood|neighbourhood|houses|village|cottages|district)\b/i.test(text))
+        return "houses";
+    if (/\b(forest|trees|woods|grove)\b/i.test(text))
+        return "trees";
+    return null;
+}
+function areaCells(area) {
+    const cells = [];
+    for (let y = area.y; y < area.y + area.h; y += 1) {
+        for (let x = area.x; x < area.x + area.w; x += 1)
+            cells.push({ x, y });
+    }
+    return cells.slice(0, 36);
+}
+function clipPaint(op, area) {
+    const x = Math.max(op.x, area.x);
+    const y = Math.max(op.y, area.y);
+    const x2 = Math.min(op.x + op.w, area.x + area.w);
+    const y2 = Math.min(op.y + op.h, area.y + area.h);
+    if (x2 <= x || y2 <= y)
+        return null;
+    return { ...op, x, y, w: x2 - x, h: y2 - y };
+}
+function prepareFootprints(world, cells, inside, wetTerrain) {
+    const prep = [];
+    const removed = new Set();
+    for (const cell of cells) {
+        if (!inside && wetTerrain) {
+            let wet = false;
+            for (let dy = 0; dy < cell.h; dy += 1) {
+                for (let dx = 0; dx < cell.w; dx += 1)
+                    if (world.terrain[cell.y + dy]?.[cell.x + dx] === "water")
+                        wet = true;
+            }
+            if (wet)
+                prep.push({ op: "paint", x: cell.x, y: cell.y, w: cell.w, h: cell.h, terrain: wetTerrain });
+        }
+        for (const entity of world.entities) {
+            if (removed.has(entity.id))
+                continue;
+            if (inside ? entity.inside !== inside : Boolean(entity.inside))
+                continue;
+            if (!covers(entity, cell.x, cell.y, cell.w, cell.h))
+                continue;
+            removed.add(entity.id);
+            prep.push({ op: "remove", id: entity.id });
+        }
+    }
+    return prep;
+}
+function stamp(sprite, label, x, y, inside) {
+    const info = SPRITES[sprite];
+    return {
+        op: "place",
+        kind: info.kind,
+        x,
+        y,
+        sprite,
+        label,
+        ...(inside ? { inside } : {}),
+        ...(sprite === "prop" ? { model: inventModel(label) } : {}),
+    };
+}
+function packInArea(world, area, request, prototypes, fill) {
+    const loose = area.w === 1 || area.h === 1;
+    const limitW = request.inside ? ROOM_W : GRID_W;
+    const limitH = request.inside ? ROOM_H : GRID_H;
+    const seeds = prototypes.length ? prototypes : [stamp("prop", "Marker", area.x, area.y, request.inside)];
+    const copies = fill
+        ? Array.from({ length: 12 }, (_, index) => seeds[index % seeds.length]).filter((item) => Boolean(item))
+        : seeds;
+    const spots = [];
+    const placed = [];
+    for (const proto of copies) {
+        const foot = placeFootprint(proto);
+        let found = null;
+        for (let y = area.y; y < area.y + area.h && !found; y += 1) {
+            for (let x = area.x; x < area.x + area.w; x += 1) {
+                const insideArea = loose || (x + foot.w <= area.x + area.w && y + foot.h <= area.y + area.h);
+                const onMap = x + foot.w <= limitW && y + foot.h <= limitH;
+                const blocked = spots.some((spot) => spot.x < x + foot.w && spot.x + spot.w > x && spot.y < y + foot.h && spot.y + spot.h > y);
+                if (!insideArea || !onMap || blocked)
+                    continue;
+                found = { x, y };
+                break;
+            }
+        }
+        if (!found)
+            break;
+        spots.push({ x: found.x, y: found.y, w: foot.w, h: foot.h });
+        const { inside: _ignored, ...rest } = proto;
+        placed.push(request.inside ? { ...rest, x: found.x, y: found.y, inside: request.inside } : { ...rest, x: found.x, y: found.y });
+        if (placed.length >= (fill ? 12 : seeds.length))
+            break;
+    }
+    const wet = placed.some((op) => placeFootprint(op).kind === "tree") ? "grass" : null;
+    return [...prepareFootprints(world, spots, request.inside, wet), ...placed];
+}
+function roadsIn(world, area, inside) {
+    const cells = areaCells(area).map((cell) => ({ ...cell, w: 1, h: 1 }));
+    const roads = cells.map((cell) => stamp("road", "Road", cell.x, cell.y, inside));
+    return [...prepareFootprints(world, cells, inside, "dirt"), ...roads];
+}
+function fitRequestToArea(ops, request, world, area, only) {
+    const intent = areaIntent(request.text);
+    const mine = (op) => (only && intent ? true : placeBelongs(request, op));
+    const kept = [];
+    const places = [];
+    for (const op of ops) {
+        if (op.op === "paint") {
+            const clipped = clipPaint(op, area);
+            if (clipped)
+                kept.push(clipped);
+            continue;
+        }
+        if (op.op === "place" && mine(op)) {
+            places.push(op);
+            continue;
+        }
+        kept.push(op);
+    }
+    if (intent === "road")
+        return [...kept.filter((op) => op.op !== "paint"), ...roadsIn(world, area, request.inside)];
+    if (intent === "houses")
+        return [...kept, ...packInArea(world, area, request, [stamp("house_small", "Cottage", area.x, area.y, request.inside)], true)];
+    if (intent === "trees")
+        return [...kept, ...packInArea(world, area, request, [stamp("tree_oak", "Oak", area.x, area.y, request.inside)], true)];
+    return [...kept, ...packInArea(world, area, request, places.length ? places : ops.flatMap((op) => (op.op === "place" ? [op] : [])).slice(0, 1), false)];
+}
+export function carrySpot(requests, world, ops) {
+    const pinned = requests.filter((request) => spotBox(request.spot, request.inside) && !focusEntity(request, world));
+    if (!pinned.length)
+        return ops;
+    let next = ops;
+    const singles = pinned.filter((request) => {
+        const area = spotBox(request.spot, request.inside);
+        return area && area.w * area.h === 1;
+    });
+    for (const request of pinned) {
+        const area = spotBox(request.spot, request.inside);
+        if (!area || area.w * area.h === 1)
+            continue;
+        next = fitRequestToArea(next, request, world, area, requests.length === 1);
+    }
+    if (!singles.length)
+        return next.slice(0, 48);
+    const anchored = new Set();
+    const laid = [];
+    for (const op of next) {
+        if (op.op !== "place") {
+            laid.push(op);
+            continue;
+        }
+        const matched = singles.findIndex((request, index) => !anchored.has(index) && placeBelongs(request, op));
+        const chosen = matched >= 0 ? matched : singles.length === 1 && pinned.length === 1 && !anchored.has(0) ? 0 : -1;
+        if (chosen < 0) {
+            laid.push(op);
+            continue;
+        }
+        anchored.add(chosen);
+        const request = singles[chosen];
+        laid.push(...(request ? anchorPlace(world, op, request) : [op]));
+    }
+    return laid.slice(0, 48);
+}
+function addInside(world, ops, host, label) {
+    const spot = roomSpot(world, ops, host.id);
+    if (!spot)
+        return;
+    ops.push({ op: "place", kind: "custom", x: spot.x, y: spot.y, sprite: "prop", label, inside: host.id, model: inventModel(label) });
+}
+export function carryInterior(requests, world, ops) {
+    const tagged = ops.map((op) => {
+        if (op.op !== "place" || op.inside || !isFurniture(op.label))
+            return op;
+        const request = requests.find((item) => furnitureNames(item.text).some((label) => op.label.toLowerCase().includes(label.toLowerCase()))) ??
+            requests.find((item) => item.inside || /\b(?:inside|into|in)\s+/i.test(item.text));
+        const host = request ? hostFor(request, world) : null;
+        if (!host)
+            return op;
+        return { ...op, inside: host.id };
+    });
+    const fitted = [];
+    for (const op of tagged) {
+        if (op.op !== "place" || !op.inside) {
+            fitted.push(op);
+            continue;
+        }
+        const w = op.w ?? 1;
+        const h = op.h ?? 1;
+        const fits = op.x >= 0 && op.y >= 0 && op.x + w <= ROOM_W && op.y + h <= ROOM_H;
+        if (fits) {
+            fitted.push(op);
+            continue;
+        }
+        const spot = roomSpot(world, fitted, op.inside);
+        fitted.push(spot ? { ...op, x: spot.x, y: spot.y, w: 1, h: 1 } : op);
+    }
+    return fitted;
 }
 const COUNTS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
 const LANDMARKS = {
@@ -408,7 +841,30 @@ function openSpot(world, w, h, terrainOk) {
     return { x: best.x, y: best.y };
 }
 const LAND = new Set(["grass", "sand", "snow", "dirt", "stone"]);
-export function planBatch(world, requests) {
+export function planBatch(world, incoming) {
+    const direct = [];
+    const requests = incoming.filter((request) => {
+        const entity = focusEntity(request, world);
+        if (!entity)
+            return true;
+        const edits = focusEdits(entity, request.text);
+        if (!edits.length)
+            return true;
+        direct.push(...edits);
+        return false;
+    });
+    if (!requests.length) {
+        const everyone = joinNames([...new Set(incoming.map((request) => request.playerName))]);
+        return {
+            batch: {
+                requestIds: incoming.map((request) => request.id),
+                baseVersion: world.version,
+                ops: direct.slice(0, 48),
+                reply: focusReply(direct),
+            },
+            lines: [{ from: "Director", text: `Changing what ${everyone} selected.` }],
+        };
+    }
     const allTags = new Set();
     for (const request of requests)
         for (const tag of tagsFor(request.text))
@@ -562,6 +1018,18 @@ export function planBatch(world, requests) {
                 addPlace(ground, storyOps, "prop", label, undefined, (terrain) => LAND.has(terrain));
         }
     }
+    for (const request of requests) {
+        const host = hostFor(request, world);
+        for (const label of furnitureNames(request.text)) {
+            const count = howMany([request], label);
+            for (let i = 0; i < count; i += 1) {
+                if (host)
+                    addInside(world, storyOps, host, label);
+                else
+                    addPlace(ground, storyOps, "prop", label, undefined, (terrain) => LAND.has(terrain));
+            }
+        }
+    }
     if (terrainOps.length + buildOps.length + storyOps.length === 0) {
         for (const request of requests) {
             const text = request.text.trim().replace(/\s+/g, " ");
@@ -571,18 +1039,25 @@ export function planBatch(world, requests) {
     }
     const sky = skyAsk(requests);
     const skyOps = sky ? [{ op: "sky", value: sky }] : [];
-    const ops = carryMotion(requests, carryColor(requests, [...skyOps, ...terrainOps, ...buildOps, ...storyOps])).slice(0, 48);
-    const reply = replyFor({
-        wantMoat,
-        wantShore,
-        castlePeople,
-        waterPeople,
-        winterPeople,
-        beachPeople,
-        everyone,
-        requests,
-        ops,
+    const ops = carrySpot(incoming, world, [...direct, ...carryMotion(requests, carryColor(requests, carryInterior(requests, world, [...skyOps, ...terrainOps, ...buildOps, ...storyOps])))]).slice(0, 48);
+    const onTile = incoming.some((request) => request.spot) && ops.some((op) => op.op === "place");
+    const wide = incoming.some((request) => {
+        const area = spotBox(request.spot, request.inside);
+        return area != null && area.w * area.h > 1;
     });
+    const reply = [focusReply(direct), replyFor({
+            wantMoat,
+            wantShore,
+            castlePeople,
+            waterPeople,
+            winterPeople,
+            beachPeople,
+            everyone,
+            requests,
+            ops,
+        }), onTile ? (wide ? "I built it inside the area you selected." : "I built it on the tile you selected.") : ""]
+        .filter(Boolean)
+        .join(" ");
     const lines = [
         { from: "Director", text: `Reading ${requests.length} request${requests.length === 1 ? "" : "s"} from ${everyone}.` },
         {

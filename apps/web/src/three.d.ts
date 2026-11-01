@@ -41,6 +41,8 @@ declare module "three" {
     homeZ?: number;
     phase?: number;
     wing?: number;
+    cellX?: number;
+    cellY?: number;
   }
 
   export class Object3D {
@@ -160,6 +162,8 @@ declare module "three/addons/controls/OrbitControls.js" {
     maxPolarAngle: number;
     minDistance: number;
     maxDistance: number;
+    enabled: boolean;
+    mouseButtons: { LEFT: number; MIDDLE: number; RIGHT: number };
     constructor(camera: Camera, domElement?: HTMLElement);
     addEventListener(type: string, listener: () => void): void;
     update(): void;

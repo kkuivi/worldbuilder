@@ -36,6 +36,7 @@ export const editOpSchema = z.discriminatedUnion("op", [
     label: z.string().trim().min(1).max(40),
     note: z.string().trim().max(160).optional(),
     model: modelField,
+    inside: z.string().trim().min(1).max(40).optional(),
   }),
   z.object({
     op: z.literal("move"),

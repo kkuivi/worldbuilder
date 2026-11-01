@@ -1,5 +1,5 @@
 import { SPRITES } from "./sprites.js";
-import { TERRAIN_HEIGHT } from "./types.js";
+import { ROOM_H, ROOM_W, TERRAIN_HEIGHT, canEnter } from "./types.js";
 const TERRAIN_CHAR = {
     grass: ".",
     water: "~",
@@ -42,6 +42,8 @@ export function renderDigest(world) {
     for (const [terrain, char] of Object.entries(TERRAIN_CHAR))
         legend.set(char, terrain);
     for (const entity of world.entities) {
+        if (entity.inside)
+            continue;
         const char = SPRITE_CHAR[entity.sprite];
         legend.set(char, entity.sprite);
         for (let dy = 0; dy < entity.h; dy += 1) {
@@ -57,7 +59,7 @@ export function renderDigest(world) {
     const rows = grid.map((row, y) => `${String(y).padStart(2, "0")} ${row.join("")}`);
     const players = world.players.map((player) => `${player.name} (${player.id})`).join(", ") || "none";
     const entities = world.entities
-        .map((entity) => `- ${entity.id} ${entity.sprite} "${entity.label}" at ${entity.x},${entity.y} ${entity.w}x${entity.h} by ${entity.createdBy}${entity.note ? ` note: ${entity.note}` : ""}`)
+        .map((entity) => `- ${entity.id} ${entity.sprite} "${entity.label}" at ${entity.x},${entity.y} ${entity.w}x${entity.h}${entity.inside ? ` inside ${entity.inside}` : ""} by ${entity.createdBy}${entity.note ? ` note: ${entity.note}` : ""}`)
         .join("\n");
     const chat = world.chat
         .slice(-12)
@@ -73,8 +75,17 @@ export function renderDigest(world) {
         .sort((a, b) => a[1] - b[1])
         .map(([name]) => name)
         .join(", ");
+    const rooms = world.entities
+        .filter((entity) => canEnter(entity))
+        .map((building) => {
+        const pieces = world.entities.filter((entity) => entity.inside === building.id).map((entity) => `${entity.label} at ${entity.x},${entity.y}`);
+        return `- ${building.id} "${building.label}" interior ${ROOM_W}x${ROOM_H}: ${pieces.join(", ") || "empty"}`;
+    })
+        .join("\n");
     return [
         `World ${world.name} (${world.worldId}) version ${world.version}. Grid ${width} wide by ${height} tall. Origin is the top left. Sky is ${world.sky ?? "day"}.`,
+        `A house, tower, or castle has an interior of ${ROOM_W} by ${ROOM_H}. Furniture place ops set "inside" to that building id and use coordinates inside the room, starting at 0,0.`,
+        rooms ? `Interiors:\n${rooms}` : "Interiors: none yet.",
         `Height, lowest to highest: ${heights}. Objects stand on the tiles under them. Painting a tile changes its height.`,
         `Players: ${players}`,
         `Sprites: ${spriteList}`,

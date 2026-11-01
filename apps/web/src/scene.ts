@@ -3,6 +3,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   GRID_H,
   GRID_W,
+  ROOM_H,
+  ROOM_W,
   TERRAIN_HEIGHT,
   airborne,
   inventModel,
@@ -48,11 +50,16 @@ export interface ScenePulse {
 }
 
 export interface WorldScene {
-  sync(world: WorldState, selectedId: string | null, births: Record<string, number>, pulse: ScenePulse | null): void;
+  sync(world: WorldState, selectedId: string | null, births: Record<string, number>, pulse: ScenePulse | null, insideId?: string | null, tile?: { x: number; y: number; w: number; h: number } | null): void;
   dispose(): void;
 }
 
-export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | null) => void): WorldScene {
+export function createScene(
+  canvas: HTMLCanvasElement,
+  onSelect: (id: string | null) => void,
+  onMove: (id: string, x: number, y: number) => Promise<boolean> | boolean,
+  onTile: (tile: { x: number; y: number; w: number; h: number } | null) => void,
+): WorldScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0xb7d4ec);
@@ -68,6 +75,7 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
   controls.maxPolarAngle = Math.PI / 2.08;
   controls.minDistance = 8;
   controls.maxDistance = 72;
+  controls.mouseButtons.RIGHT = 0;
   controls.update();
 
   let userMoved = false;
@@ -100,13 +108,23 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     ambient.intensity = night ? 0.16 : 0.35;
     sun.color.set(night ? 0xb7c7e6 : 0xfff6e4);
     sun.intensity = night ? 0.28 : 1.25;
-    stars.visible = night;
+    stars.visible = night && !insideNow;
+    if (insideNow) {
+      renderer.setClearColor(0x1c1916);
+      hemi.color.set(0xfff1d6);
+      hemi.groundColor.set(0xc4a574);
+      hemi.intensity = 0.72;
+      ambient.color.set(0xfff6e8);
+      ambient.intensity = 0.42;
+      sun.intensity = 0.45;
+    }
   }
 
   const terrain = new THREE.Group();
   const props = new THREE.Group();
   const pulses = new THREE.Group();
-  scene.add(terrain, props, pulses);
+  const areaMarks = new THREE.Group();
+  scene.add(terrain, props, pulses, areaMarks);
 
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.62, 0.78, 28),
@@ -123,14 +141,17 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
 
   let world: WorldState | null = null;
   let selectedId: string | null = null;
+  let selectedTile: { x: number; y: number; w: number; h: number } | null = null;
   let births: Record<string, number> = {};
-  let builtVersion = -1;
+  let builtKey = "";
+  let insideNow: string | null = null;
   let seenPulse = 0;
   let viewW = 0;
   let viewH = 0;
   let pointerDown: { x: number; y: number } | null = null;
 
   function frameWorld() {
+    controls.target.set(GRID_W / 2, 0.35, GRID_H * 0.42);
     const aspect = Math.max(camera.aspect || 1, 0.55);
     const halfFov = ((camera.fov * Math.PI) / 180) / 2;
     const distance = Math.max(16, 20 / (Math.tan(halfFov) * aspect));
@@ -144,6 +165,17 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     controls.update();
   }
 
+  function frameView() {
+    if (insideNow) frameRoom();
+    else frameWorld();
+  }
+
+  function frameRoom() {
+    controls.target.set(ROOM_W / 2, 0.35, ROOM_H / 2);
+    camera.position.set(ROOM_W / 2 + 1.6, 6.4, ROOM_H + 4.2);
+    controls.update();
+  }
+
   function resize() {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -154,7 +186,7 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    if (!userMoved) frameWorld();
+    if (!userMoved) frameView();
   }
 
   function surface(x: number, y: number) {
@@ -182,10 +214,69 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     return top;
   }
 
+  function addPlaced(entity: Entity, ground: number) {
+    const group = buildEntity(entity);
+    group.position.set(entity.x + entity.w / 2, ground, entity.y + entity.h / 2);
+    if (!insideNow && airborne(`${entity.label} ${entity.note ?? ""}`)) {
+      group.userData.fly = true;
+      group.userData.homeX = group.position.x;
+      group.userData.homeY = group.position.y;
+      group.userData.homeZ = group.position.z;
+      let phase = 0;
+      for (const char of entity.id) phase += char.charCodeAt(0);
+      group.userData.phase = phase;
+    }
+    props.add(group);
+  }
+
+  function drawInterior(insideId: string) {
+    for (let y = 0; y < ROOM_H; y += 1) {
+      for (let x = 0; x < ROOM_W; x += 1) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.16, 0.98), lambert((x + y) % 2 === 0 ? 0xc4a574 : 0xb8956a));
+        mesh.position.set(x + 0.5, 0.08, y + 0.5);
+        mesh.userData.cellX = x;
+        mesh.userData.cellY = y;
+        terrain.add(mesh);
+      }
+    }
+    const plaster = 0xf4efe4;
+    const wall = (x: number, z: number, w: number, d: number) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 1.15, d), lambert(plaster));
+      mesh.position.set(x, 0.72, z);
+      terrain.add(mesh);
+    };
+    wall(ROOM_W / 2, -0.08, ROOM_W + 0.2, 0.16);
+    wall(-0.08, ROOM_H / 2, 0.16, ROOM_H);
+    wall(ROOM_W + 0.08, ROOM_H / 2, 0.16, ROOM_H);
+    wall(1.4, ROOM_H + 0.08, 2.8, 0.16);
+    wall(ROOM_W - 1.4, ROOM_H + 0.08, 2.8, 0.16);
+    for (const x of [2.2, ROOM_W - 2.2]) {
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 0.06), new THREE.MeshBasicMaterial({ color: 0x9fd4ef }));
+      glass.position.set(x, 0.85, -0.02);
+      terrain.add(glass);
+    }
+    for (const entity of world?.entities ?? []) {
+      if (entity.inside !== insideId) continue;
+      addPlaced(entity, 0.2);
+    }
+    const guests = (world?.players ?? []).filter((player) => player.inside === insideId);
+    guests.forEach((player, index) => {
+      const group = new THREE.Group();
+      const color = Number.parseInt(player.color.replace("#", ""), 16);
+      person(group, Number.isFinite(color) ? color : 0xe85d4c, 0.62);
+      group.position.set(ROOM_W / 2 + (index - (guests.length - 1) / 2) * 0.55, 0.16, ROOM_H - 0.7);
+      props.add(group);
+    });
+  }
+
   function rebuild() {
     clearGroup(terrain);
     clearGroup(props);
     if (!world) return;
+    if (insideNow) {
+      drawInterior(insideNow);
+      return;
+    }
     for (let y = 0; y < GRID_H; y += 1) {
       for (let x = 0; x < GRID_W; x += 1) {
         const kind = world.terrain[y]?.[x] ?? "grass";
@@ -194,22 +285,14 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
         mesh.position.set(x + 0.5, height / 2, y + 0.5);
         mesh.userData.water = kind === "water";
         mesh.userData.baseY = height / 2;
+        mesh.userData.cellX = x;
+        mesh.userData.cellY = y;
         terrain.add(mesh);
       }
     }
     for (const entity of world.entities) {
-      const group = buildEntity(entity);
-      group.position.set(entity.x + entity.w / 2, standHeight(entity), entity.y + entity.h / 2);
-      if (airborne(`${entity.label} ${entity.note ?? ""}`)) {
-        group.userData.fly = true;
-        group.userData.homeX = group.position.x;
-        group.userData.homeY = group.position.y;
-        group.userData.homeZ = group.position.z;
-        let phase = 0;
-        for (const char of entity.id) phase += char.charCodeAt(0);
-        group.userData.phase = phase;
-      }
-      props.add(group);
+      if (entity.inside) continue;
+      addPlaced(entity, standHeight(entity));
     }
   }
 
@@ -231,30 +314,132 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     }
   }
 
-  function pick(clientX: number, clientY: number) {
+  function aim(clientX: number, clientY: number) {
     const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
+    if (rect.width === 0 || rect.height === 0) return false;
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
+    return true;
+  }
+
+  function pickId(clientX: number, clientY: number): string | null {
+    if (!aim(clientX, clientY)) return null;
     const hits = raycaster.intersectObjects(props.children, true);
     let node: THREE.Object3D | null = hits[0]?.object ?? null;
     while (node && node.userData.id == null) node = node.parent;
-    onSelect(typeof node?.userData.id === "string" ? node.userData.id : null);
+    return typeof node?.userData.id === "string" ? node.userData.id : null;
+  }
+
+  function tileAt(clientX: number, clientY: number): { x: number; y: number } | null {
+    if (!aim(clientX, clientY)) return null;
+    const hits = raycaster.intersectObjects(terrain.children, false);
+    for (const hit of hits) {
+      const x = hit.object.userData.cellX;
+      const y = hit.object.userData.cellY;
+      if (typeof x === "number" && typeof y === "number") return { x, y };
+    }
+    return null;
+  }
+
+  function fits(entity: Entity, x: number, y: number) {
+    const width = insideNow ? ROOM_W : GRID_W;
+    const height = insideNow ? ROOM_H : GRID_H;
+    return x >= 0 && y >= 0 && x + entity.w <= width && y + entity.h <= height;
+  }
+
+  function placePreview(id: string, x: number, y: number, lift: boolean) {
+    const entity = world?.entities.find((item) => item.id === id);
+    const group = props.children.find((child) => child.userData.id === id);
+    if (!entity || !group) return;
+    const ground = insideNow ? 0.2 : standHeight({ ...entity, x, y });
+    group.position.set(x + entity.w / 2, ground + (lift ? 0.35 : 0), y + entity.h / 2);
+  }
+
+  let drag: { id: string; originX: number; originY: number; grabX: number; grabY: number; x: number; y: number; moved: boolean } | null = null;
+  let regionDrag: { x: number; y: number; ax: number; ay: number } | null = null;
+  let shownMarks = "";
+
+  function selectionBox(x0: number, y0: number, x1: number, y1: number) {
+    const x = Math.min(x0, x1);
+    const y = Math.min(y0, y1);
+    return { x, y, w: Math.abs(x1 - x0) + 1, h: Math.abs(y1 - y0) + 1 };
   }
 
   const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
     pointerDown = { x: event.clientX, y: event.clientY };
+    const id = pickId(event.clientX, event.clientY);
+    const entity = id ? world?.entities.find((item) => item.id === id) : undefined;
+    const tile = entity ? tileAt(event.clientX, event.clientY) : null;
+    if (id && entity && tile) {
+      drag = { id, originX: entity.x, originY: entity.y, grabX: tile.x, grabY: tile.y, x: entity.x, y: entity.y, moved: false };
+      controls.enabled = false;
+      onSelect(id);
+      onTile(null);
+      event.stopPropagation();
+      return;
+    }
+    const ground = tileAt(event.clientX, event.clientY);
+    if (!ground) return;
+    regionDrag = { x: ground.x, y: ground.y, ax: ground.x, ay: ground.y };
+    controls.enabled = false;
+    event.stopPropagation();
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    if (!drag || !pointerDown) return;
+    const tile = tileAt(event.clientX, event.clientY);
+    const entity = world?.entities.find((item) => item.id === drag?.id);
+    if (!tile || !entity || !drag) return;
+    const x = drag.originX + (tile.x - drag.grabX);
+    const y = drag.originY + (tile.y - drag.grabY);
+    if (!fits(entity, x, y)) return;
+    if (x !== drag.originX || y !== drag.originY) drag.moved = true;
+    drag.x = x;
+    drag.y = y;
+    placePreview(drag.id, x, y, true);
+  };
+  const onRegionMove = (event: PointerEvent) => {
+    if (!regionDrag) return;
+    const tile = tileAt(event.clientX, event.clientY);
+    if (!tile) return;
+    regionDrag = { ...regionDrag, ax: tile.x, ay: tile.y };
   };
   const onPointerUp = (event: PointerEvent) => {
+    const drop = drag;
+    const region = regionDrag;
+    drag = null;
+    regionDrag = null;
+    controls.enabled = true;
+    if (region) {
+      pointerDown = null;
+      onSelect(null);
+      onTile(selectionBox(region.x, region.y, region.ax, region.ay));
+      return;
+    }
     if (!pointerDown) return;
     const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y);
     pointerDown = null;
-    if (moved > 6) return;
-    pick(event.clientX, event.clientY);
+    if (drop?.moved) {
+      void Promise.resolve(onMove(drop.id, drop.x, drop.y)).then((ok) => {
+        if (!ok) placePreview(drop.id, drop.originX, drop.originY, false);
+      });
+      return;
+    }
+    if (drop || moved > 6) return;
+    const id = pickId(event.clientX, event.clientY);
+    if (id) {
+      onSelect(id);
+      onTile(null);
+      return;
+    }
+    onSelect(null);
+    onTile(tileAt(event.clientX, event.clientY));
   };
   const onContext = (event: Event) => event.preventDefault();
-  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointerdown", onPointerDown, true);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointermove", onRegionMove);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("contextmenu", onContext);
 
@@ -275,7 +460,7 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
       const age = reduceMotion ? 1 : Math.min(1, Math.max(0, (now - born) / 240));
       const scale = 0.15 + 0.85 * (1 - (1 - age) * (1 - age));
       child.scale.setScalar(scale);
-      if (child.userData.fly) {
+      if (child.userData.fly && drag?.id !== child.userData.id) {
         const phase = Number(child.userData.phase ?? 0);
         if (reduceMotion) {
           child.position.y = Number(child.userData.homeY) + 1.7;
@@ -314,11 +499,36 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
         node.material.emissive.setHex(selected && node.parent && belongsTo(node, selected) ? 0x4a3418 : 0x000000);
       }
     });
+    const draft = regionDrag ? selectionBox(regionDrag.x, regionDrag.y, regionDrag.ax, regionDrag.ay) : null;
+    const marked = draft && draft.w * draft.h > 1 ? draft : selectedTile && selectedTile.w * selectedTile.h > 1 ? selectedTile : null;
+    const nextMarks = marked ? `${marked.x},${marked.y},${marked.w},${marked.h},${insideNow ?? ""}` : "";
+    if (nextMarks !== shownMarks) {
+      shownMarks = nextMarks;
+      clearGroup(areaMarks);
+      if (marked) {
+        for (let y = marked.y; y < marked.y + marked.h; y += 1) {
+          for (let x = marked.x; x < marked.x + marked.w; x += 1) {
+            const mesh = new THREE.Mesh(
+              new THREE.BoxGeometry(0.92, 0.05, 0.92),
+              new THREE.MeshBasicMaterial({ color: 0xe85d4c, transparent: true, opacity: 0.45, depthWrite: false }),
+            );
+            mesh.position.set(x + 0.5, (insideNow ? 0.2 : surface(x, y)) + 0.06, y + 0.5);
+            areaMarks.add(mesh);
+          }
+        }
+      }
+    }
+    if (ring.material instanceof THREE.MeshBasicMaterial) ring.material.color.setHex(selected ? 0xfffaf2 : 0xe85d4c);
     if (selected && world) {
       const entity = world.entities.find((item) => item.id === selectedId);
       ring.visible = true;
       ring.position.set(selected.position.x, selected.position.y + 0.06, selected.position.z);
       ring.scale.setScalar(entity ? Math.max(entity.w, entity.h) : 1);
+    } else if (selectedTile && selectedTile.w * selectedTile.h === 1 && !draft) {
+      const ground = insideNow ? 0.2 : surface(selectedTile.x, selectedTile.y);
+      ring.visible = true;
+      ring.position.set(selectedTile.x + 0.5, ground + 0.08, selectedTile.y + 0.5);
+      ring.scale.setScalar(1);
     } else {
       ring.visible = false;
     }
@@ -330,29 +540,41 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
   raf = requestAnimationFrame(frame);
 
   return {
-    sync(next, nextSelected, nextBirths, pulse) {
+    sync(next, nextSelected, nextBirths, pulse, insideId: string | null = null, tile: { x: number; y: number; w: number; h: number } | null = null) {
       world = next;
       selectedId = nextSelected;
+      selectedTile = tile;
       births = nextBirths;
+      const entered = insideNow !== insideId;
+      insideNow = insideId;
       applySky(next.sky);
-      if (next.version !== builtVersion) {
+      const key = `${next.version}:${insideId ?? ""}`;
+      if (key !== builtKey) {
         rebuild();
-        builtVersion = next.version;
+        builtKey = key;
       }
-      if (pulse && pulse.at !== seenPulse) {
+      if (entered) {
+        userMoved = false;
+        controls.minDistance = insideId ? 3 : 8;
+        frameView();
+      }
+      if (!insideNow && pulse && pulse.at !== seenPulse) {
         seenPulse = pulse.at;
         showPulse(pulse);
       }
     },
     dispose() {
       cancelAnimationFrame(raf);
-      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerdown", onPointerDown, true);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointermove", onRegionMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("contextmenu", onContext);
       controls.dispose();
       clearGroup(terrain);
       clearGroup(props);
       clearGroup(pulses);
+      clearGroup(areaMarks);
       ring.geometry.dispose();
       if (ring.material instanceof THREE.Material) ring.material.dispose();
       renderer.dispose();

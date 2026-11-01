@@ -38,6 +38,7 @@ export function useWorld(roomId: string, player: Player) {
   const seq = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const mode = useRef<"connecting" | "live" | "polling">("connecting");
+  const moveWait = useRef(new Map<string, (ok: boolean) => void>());
 
   const commit = useCallback((next: WorldState) => {
     worldRef.current = next;
@@ -79,7 +80,7 @@ export function useWorld(roomId: string, player: Player) {
           sky: payload.sky ?? current.sky,
           terrain: payload.terrain,
           entities: payload.entities,
-          chat: appendChat(current.chat, payload.message),
+          chat: payload.message.text ? appendChat(current.chat, payload.message) : current.chat,
         });
         setStatus("Director · The map changed.");
         setBusy(false);
@@ -107,18 +108,23 @@ export function useWorld(roomId: string, player: Player) {
   );
 
   const say = useCallback(
-    async (text: string) => {
+    async (text: string, inside?: string | null, focus?: string | null, spot?: { x: number; y: number; w?: number; h?: number } | null) => {
       const clean = text.trim();
       if (!clean) return;
       const socket = socketRef.current;
+      const room = inside || undefined;
+      const selected = focus || undefined;
+      const pin = spot && Number.isInteger(spot.x) && Number.isInteger(spot.y)
+        ? { x: spot.x, y: spot.y, w: spot.w && spot.w > 0 ? spot.w : 1, h: spot.h && spot.h > 0 ? spot.h : 1 }
+        : undefined;
       if (socket && socket.readyState === WebSocket.OPEN && mode.current === "live") {
-        socket.send(JSON.stringify({ type: "say", playerId: player.id, text: clean }));
+        socket.send(JSON.stringify({ type: "say", playerId: player.id, text: clean, inside: room, focus: selected, spot: pin }));
         return;
       }
       const response = await fetch(`/api/worlds/${roomId}/say`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ playerId: player.id, text: clean }),
+        body: JSON.stringify({ playerId: player.id, text: clean, inside: room, focus: selected, spot: pin }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -126,6 +132,46 @@ export function useWorld(roomId: string, player: Player) {
       }
     },
     [player.id, roomId],
+  );
+
+  const locate = useCallback(
+    (inside: string | null) => {
+      const socket = socketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN && mode.current === "live") {
+        socket.send(JSON.stringify({ type: "inside", playerId: player.id, inside }));
+      }
+    },
+    [player.id],
+  );
+
+  const move = useCallback(
+    async (id: string, x: number, y: number) => {
+      const token = `${Date.now()}-${id}`;
+      const socket = socketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN && mode.current === "live") {
+        const result = new Promise<boolean>((resolve) => {
+          moveWait.current.set(token, resolve);
+          window.setTimeout(() => {
+            if (!moveWait.current.has(token)) return;
+            moveWait.current.delete(token);
+            resolve(false);
+          }, 4000);
+        });
+        socket.send(JSON.stringify({ type: "move", token, playerId: player.id, id, x, y }));
+        return result;
+      }
+      const response = await fetch(`/api/worlds/${roomId}/move`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ playerId: player.id, id, x, y }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; reason?: string; world?: WorldState };
+      if (body.world) commit(body.world);
+      if (!body.ok && body.reason) setError(body.reason);
+      else setError("");
+      return Boolean(body.ok);
+    },
+    [commit, player.id, roomId],
   );
 
   useEffect(() => {
@@ -191,9 +237,25 @@ export function useWorld(roomId: string, player: Player) {
         socket.send(JSON.stringify({ type: "join", player }));
       };
       socket.onmessage = (event) => {
-        const message = JSON.parse(String(event.data)) as { type?: string; world?: WorldState; events?: WorldEvent[]; event?: WorldEvent; error?: string };
+        const message = JSON.parse(String(event.data)) as {
+          type?: string;
+          world?: WorldState;
+          events?: WorldEvent[];
+          event?: WorldEvent;
+          error?: string;
+          token?: string;
+          ok?: boolean;
+          reason?: string;
+        };
         if (message.type === "state" && message.world) takeSnapshot(message.world, message.events ?? []);
         if (message.type === "event" && message.event) applyEvent(message.event);
+        if (message.type === "move_result" && message.token) {
+          const finish = moveWait.current.get(message.token);
+          if (!message.ok && message.reason) setError(message.reason);
+          else setError("");
+          finish?.(Boolean(message.ok));
+          moveWait.current.delete(message.token);
+        }
         if (message.type === "error" && message.error) setError(message.error);
       };
       socket.onerror = () => {
@@ -218,5 +280,5 @@ export function useWorld(roomId: string, player: Player) {
     };
   }, [applyEvent, commit, player, roomId, takeSnapshot]);
 
-  return { world, status, log, connection, error, accent, busy, say };
+  return { world, status, log, connection, error, accent, busy, say, locate, move };
 }

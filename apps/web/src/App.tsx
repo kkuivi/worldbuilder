@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { PLAYER_COLORS, type Entity, type Player, type WorldState } from "@worldbuilder/contracts";
+import { PLAYER_COLORS, canEnter, type Entity, type Player, type WorldState } from "@worldbuilder/contracts";
 import { MapView } from "./MapView";
 import { useWorld } from "./useWorld";
 
@@ -132,90 +132,195 @@ function Gate({
   }
 
   return (
-    <main className="gate">
-      <section className="gate-card">
-        <p className="eyebrow">One map, every voice</p>
-        <h1>Shared World</h1>
-        <p className="lede">Talk to the builder together. The same world changes on every screen.</p>
-        <label>
-          Your name
-          <input value={name} maxLength={24} autoFocus onChange={(event) => setName(event.target.value)} placeholder="Ada" />
-        </label>
-        <div className="colors" role="radiogroup" aria-label="Your color">
-          {PLAYER_COLORS.map((swatch) => (
-            <button
-              key={swatch}
-              type="button"
-              className={swatch === color ? "swatch selected" : "swatch"}
-              style={{ background: swatch }}
-              aria-label={swatch}
-              aria-checked={swatch === color}
-              role="radio"
-              onClick={() => setColor(swatch)}
-            />
-          ))}
+    <main className="landing">
+      <header className="landing-bar">
+        <a className="brand" href="#start">
+          <span className="mark" />
+          <strong>Hearsay</strong>
+        </a>
+        <a className="secondary" href="#start">
+          Start a world
+        </a>
+      </header>
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">One map, every voice</p>
+          <h1>Build a world with your friends, out loud.</h1>
+          <p className="lede">
+            Ask for a ranch, a night sky, or a blue couch. A builder listens to the chat and changes the same 3D map on every screen.
+          </p>
+          <ul className="hero-points">
+            <li>Everyone in the room sees the same edits.</li>
+            <li>Houses, towers, and castles open into rooms you furnish together.</li>
+            <li>Click a tile, or drag out an area, and the next thing you ask for is built there.</li>
+          </ul>
         </div>
-        <label>
-          World name
-          <input value={worldName} maxLength={40} onChange={(event) => setWorldName(event.target.value)} placeholder="Untitled wilds" />
-        </label>
-        <button className="primary" type="button" disabled={pending} onClick={() => void createWorld()}>
-          {pending ? "Opening…" : "Create world"}
-        </button>
-        <div className="join-row">
+      </section>
+      <section className="film" aria-label="A world being built">
+        <video src="/outside.mp4" autoPlay muted loop playsInline />
+        <p>Drag out a neighborhood, lay a road through it, add cows and a campfire, then ask for night.</p>
+      </section>
+      <section className="start" id="start">
+        <div>
+          <p className="eyebrow">Open a room</p>
+          <h2>Pick a name, then make a world or walk into one.</h2>
+          <p className="lede">A room code is four letters. Share it and your friend joins the same map.</p>
+        </div>
+        <section className="gate-card">
           <label>
-            Room code
-            <input
-              value={code}
-              maxLength={4}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-              placeholder="K7QD"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") join();
-              }}
-            />
+            Your name
+            <input value={name} maxLength={24} autoFocus onChange={(event) => setName(event.target.value)} placeholder="Ada" />
           </label>
-          <button className="secondary" type="button" onClick={() => join()}>
-            Join
-          </button>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-        {worlds.length ? (
-          <div className="recent">
-            <h2>Recent worlds</h2>
-            <ul>
-              {worlds.map((world) => (
-                <li key={world.id}>
-                  <button type="button" onClick={() => join(world.id)}>
-                    <span>{world.name}</span>
-                    <span className="code">{world.id}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <div className="colors" role="radiogroup" aria-label="Your color">
+            {PLAYER_COLORS.map((swatch) => (
+              <button
+                key={swatch}
+                type="button"
+                className={swatch === color ? "swatch selected" : "swatch"}
+                style={{ background: swatch }}
+                aria-label={swatch}
+                aria-checked={swatch === color}
+                role="radio"
+                onClick={() => setColor(swatch)}
+              />
+            ))}
           </div>
-        ) : null}
+          <label>
+            World name
+            <input value={worldName} maxLength={40} onChange={(event) => setWorldName(event.target.value)} placeholder="Untitled wilds" />
+          </label>
+          <button className="primary" type="button" disabled={pending} onClick={() => void createWorld()}>
+            {pending ? "Opening…" : "Create world"}
+          </button>
+          <div className="join-row">
+            <label>
+              Room code
+              <input
+                value={code}
+                maxLength={4}
+                onChange={(event) => setCode(event.target.value.toUpperCase())}
+                placeholder="K7QD"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") join();
+                }}
+              />
+            </label>
+            <button className="secondary" type="button" onClick={() => join()}>
+              Join
+            </button>
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+          {worlds.length ? (
+            <div className="recent">
+              <h2>Recent worlds</h2>
+              <ul>
+                {worlds.map((world) => (
+                  <li key={world.id}>
+                    <button type="button" onClick={() => join(world.id)}>
+                      <span>{world.name}</span>
+                      <span className="code">{world.id}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      </section>
+      <section className="showcase">
+        <p className="eyebrow">What you can do</p>
+        <h2>The chat is the building tool.</h2>
+        <ul className="cards">
+          <li>
+            <h3>Ask for the place</h3>
+            <p>Say “add a ranch with cows,” “make a river,” or “it should be night.” The builder paints the ground and places what you named.</p>
+          </li>
+          <li>
+            <h3>Step inside</h3>
+            <p>Tap a house, tower, or castle and choose Go inside. Ask for a couch, a lamp, or a rug. Friends in that room see the same furniture.</p>
+          </li>
+          <li>
+            <h3>Move it by hand</h3>
+            <p>Drag any object to another tile. Drag across empty ground to mark a line or a block. Right-drag to look around.</p>
+          </li>
+          <li>
+            <h3>Change what you selected</h3>
+            <p>Tap something first. The chat then says Editing. “Make it blue,” “turn it into a lamp,” or “remove it” changes that piece, not a new one.</p>
+          </li>
+          <li>
+            <h3>One room, many people</h3>
+            <p>Share the code or the link. Each person picks a color, shows up on the map, and the next sentence from anyone can change the world.</p>
+          </li>
+        </ul>
+      </section>
+      <section className="howto">
+        <p className="eyebrow">How to use it</p>
+        <h2>From an empty field to a furnished room.</h2>
+        <ol>
+          <li>
+            <strong>Name yourself.</strong>
+            <span>Choose a color so friends can tell your messages apart.</span>
+          </li>
+          <li>
+            <strong>Create or join.</strong>
+            <span>A new world gets a four-letter code. Someone with the code opens the same map.</span>
+          </li>
+          <li>
+            <strong>Talk to the builder.</strong>
+            <span>Type in the chat. “Add a road in front of the tower” is enough. Wait for the map to change.</span>
+          </li>
+          <li>
+            <strong>Point at a tile.</strong>
+            <span>Click one tile, or drag from one corner to another. A road follows the line. A neighborhood stays inside the block.</span>
+          </li>
+          <li>
+            <strong>Go indoors.</strong>
+            <span>Tap the building, then Go inside. The suggestions switch to a couch, a table, and a rug.</span>
+          </li>
+          <li>
+            <strong>Rearrange.</strong>
+            <span>Drag furniture across the floor. Back outside returns you to the city, and the room keeps what you placed.</span>
+          </li>
+          <li>
+            <strong>Edit a single piece.</strong>
+            <span>Select it so the box says Editing, then describe the change. Adding something new still works when you say “add.”</span>
+          </li>
+        </ol>
       </section>
     </main>
   );
 }
 
 function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Player; onLeave: () => void }) {
-  const { world, status, log, connection, error, accent, busy, say } = useWorld(roomId, player);
+  const { world, status, log, connection, error, accent, busy, say, locate, move } = useWorld(roomId, player);
   const [draft, setDraft] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [tile, setTile] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [insideId, setInsideId] = useState<string | null>(null);
   const selected = world?.entities.find((entity) => entity.id === selectedId) ?? null;
+  const inside = world?.entities.find((entity) => entity.id === insideId && canEnter(entity)) ?? null;
   const [sendError, setSendError] = useState("");
+  const company = (world?.players ?? []).filter((item) => item.inside === insideId && item.id !== player.id);
+
+  useEffect(() => {
+    locate(inside?.id ?? null);
+  }, [inside?.id, locate]);
 
   async function send(text = draft) {
     if (!text.trim()) return;
     setSendError("");
     try {
-      await say(text);
+      await say(text, inside?.id, selected?.id, selected ? null : tile);
       setDraft("");
     } catch (reason) {
       setSendError(reason instanceof Error ? reason.message : "The message did not send.");
     }
+  }
+
+  function enterBuilding(entity: Entity) {
+    setInsideId(entity.id);
+    setSelectedId(null);
+    setTile(null);
   }
 
   return (
@@ -224,7 +329,7 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
         <div className="brand">
           <span className="mark" aria-hidden />
           <div>
-            <p className="eyebrow">Shared World</p>
+            <p className="eyebrow">Hearsay</p>
             <h1>{world?.name ?? "Opening the map"}</h1>
           </div>
         </div>
@@ -251,15 +356,56 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
       <section className="stage">
         <div className="map-pane">
           {world ? (
-            <MapView
-              world={world}
-              accent={accent}
-              selectedId={selectedId}
-              onSelect={(entity) => setSelectedId(entity?.id ?? null)}
-            />
+            <>
+              <MapView
+                world={world}
+                accent={accent}
+                selectedId={selectedId}
+                tile={tile}
+                insideId={inside?.id ?? null}
+                onSelect={(entity) => {
+                  setSelectedId(entity?.id ?? null);
+                  if (entity) setTile(null);
+                }}
+                onTile={(next) => {
+                  setSelectedId(null);
+                  setTile((current) => {
+                    if (!next) return null;
+                    const same = current && current.x === next.x && current.y === next.y && current.w === next.w && current.h === next.h;
+                    if (same && next.w === 1 && next.h === 1) return null;
+                    return next;
+                  });
+                }}
+                onMove={move}
+              />
+              {inside ? (
+                <div className="room-bar">
+                  <strong>Inside {inside.label}</strong>
+                  <span>{company.length ? `${company.map((item) => item.name).join(", ")} here too` : "Invite a friend in"}</span>
+                  <button type="button" onClick={() => { setInsideId(null); setTile(null); setSelectedId(null); }}>
+                    Back outside
+                  </button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <p className="waiting">Raising the ground…</p>
           )}
+          {tile && !selected ? (
+            <article className="inspector">
+              <header>
+                <strong>{tile.w === 1 || tile.h === 1 ? (tile.w * tile.h > 1 ? "This path" : "This tile") : "This area"}</strong>
+                <button type="button" onClick={() => setTile(null)} aria-label="Close details">
+                  Close
+                </button>
+              </header>
+              <p>
+                {tile.w * tile.h > 1
+                  ? "Ask in the chat and the builder keeps it inside this area."
+                  : "Ask in the chat and the builder puts it here."}
+              </p>
+            </article>
+          ) : null}
           {selected && world ? (
             <article className="inspector">
               <header>
@@ -270,8 +416,13 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
               </header>
               <p>{selected.note ?? "No story yet."}</p>
               <p className="meta">
-                {shownKind(selected)} · {creatorName(world, selected.createdBy)}
+                {shownKind(selected)} · {creatorName(world, selected.createdBy)} · drag it to move
               </p>
+              {canEnter(selected) ? (
+                <button className="enter" type="button" onClick={() => enterBuilding(selected)}>
+                  Go inside
+                </button>
+              ) : null}
             </article>
           ) : null}
         </div>
@@ -314,17 +465,31 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
             }}
           >
             <div className="suggestions">
-              {["Add a village", "Make a river", "It should be winter"].map((suggestion) => (
+              {(selected
+              ? ["Make it blue", "Turn it into a lamp", "Remove it"]
+              : tile
+                ? inside
+                  ? ["Add a couch", "Add a lamp", "Add a rug"]
+                  : tile.w === 1 || tile.h === 1
+                    ? tile.w * tile.h > 1
+                      ? ["Add a road", "Add a path", "Add trees"]
+                      : ["Add a tree", "Add a house", "Add a campfire"]
+                    : ["Add a neighborhood", "Add trees", "Add a road"]
+                : inside
+                  ? ["Add a couch", "Add a table", "Add a rug"]
+                  : ["Add a village", "Make a river", "It should be winter"]
+            ).map((suggestion) => (
                 <button key={suggestion} type="button" onClick={() => void send(suggestion)}>
                   {suggestion}
                 </button>
               ))}
             </div>
+            {selected ? <p className="editing">Editing {selected.label}</p> : tile ? <p className="editing">{tile.w * tile.h > 1 ? "Building in this area" : "Building on this tile"}</p> : null}
             <div className="compose-row">
               <input
                 value={draft}
                 maxLength={400}
-                placeholder="Ask for a castle, a shore, a knight…"
+                placeholder={selected ? `Change the ${selected.label}…` : tile && tile.w * tile.h > 1 ? "Ask for a road, a neighborhood, trees…" : tile ? "Ask for what should stand here…" : "Ask for a castle, a shore, a knight…"}
                 onChange={(event) => setDraft(event.target.value)}
               />
               <button className="primary" type="submit">

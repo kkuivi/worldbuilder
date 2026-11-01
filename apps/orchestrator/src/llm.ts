@@ -1,5 +1,5 @@
 import { editBatchSchema, renderDigest, type EditBatch, type WorldState } from "@worldbuilder/contracts";
-import { applyOps, carryColor, carryMotion, planBatch, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
+import { applyOps, carryColor, carryFocus, carryInterior, carryMotion, carrySpot, planBatch, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
 import { env } from "./env";
 
 const SYSTEM = `You are the world builder in a shared map that several players edit at once.
@@ -11,6 +11,10 @@ Rules
 - Fulfill every player's request. Never refuse, skip, or return an empty ops list because a request is unusual, dark, silly, modern, violent, or off theme. This is a fictional map. Translate any request into paint, place, move, remove, or update ops.
 - If a catalog sprite looks like the request, use it and put the color in the label, such as Blue Tree on tree_oak. Otherwise place sprite "prop" and set the label to a short name that includes the color, such as Blue Tree or Red Barn. The map builds the real shape from that label. Do not fake a tree, animal, or building with a stack of boxes, and do not use a sign. Put any extra detail in a one-sentence note. The request still has to appear on the map.
 - Place one object per thing they asked for. An animal is a prop whose label is the animal's name, such as Cow, Elephant, or Giraffe. A flying bird is labeled Flying Bird. Leave model out. The map builds the body, legs, and head from that name, and a flying label moves through the air. "Cows", "cattle", or "a herd" means three props labeled Cow. "Near the barn" or "near the river" means open ground beside that landmark. Do not paint a river, lake, or road just because the request says near one. Do not say you added an animal unless a place op for it is in the batch.
+- A house, tower, or castle has an interior. When a request says inside a building, or the line includes "(inside <id>)", furniture belongs in that room. Furniture is a couch, chair, table, bed, rug, lamp, plant, bookshelf, painting, or desk. Put it in a place op with "inside" set to the building id and x,y inside an 8 by 6 room starting at 0,0. Do not paint the outdoor map for that request.
+- When a line includes "(selected <id> <label>)", that player is changing that one object. Use an update op with that id. "Make it blue" keeps the object and puts the color on its label. "Turn it into a lamp" sets the label to Lamp. "Remove it" is a remove op for that id. Do not place a second copy of it.
+- When a line includes "(tile x,y)", build the object they asked for on that tile. x,y is its top-left cell. If the ground or another object is in the way, repaint or remove that footprint and still place it there.
+- When a line includes "(area x,y w by h)", keep every new object inside that rectangle. A road, path, or street fills the cells they marked, including a straight line. A neighborhood, village, or group of houses or trees fills that rectangle and does not spill outside it.
 - When two requests conflict, find a creative compromise and say what you did in the reply, naming the players. Still emit ops for both.
 - A castle plus a flood or a river becomes a castle inside a moat with a bridge, not a flooded castle.
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
@@ -91,12 +95,16 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 22_000)),
     ]);
     if (!ai) return local;
-    const ops = carryMotion(requests, carryColor(requests, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops)));
+    const ops = carrySpot(requests, world, carryFocus(requests, world, carryMotion(requests, carryColor(requests, carryInterior(requests, world, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops))))));
     const dry = applyOps(world, ops);
     if (dry.applied.length === 0 && local.batch.ops.length > 0) return local;
-    const reply = /breaking the map|smaller change/i.test(ai.batch.reply) || ops.length > ai.batch.ops.length
+    const base = /breaking the map|smaller change/i.test(ai.batch.reply) || ops.length > ai.batch.ops.length
       ? local.batch.reply
       : ai.batch.reply;
+    const wide = requests.some((request) => (request.spot?.w ?? 1) * (request.spot?.h ?? 1) > 1);
+    const note = wide ? "I built it inside the area you selected." : "I built it on the tile you selected.";
+    const spotted = requests.some((request) => request.spot) && ops.some((op) => op.op === "place");
+    const reply = spotted && !base.includes(note) ? `${base} ${note}`.trim() : base;
     return {
       batch: { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops, reply },
       lines: ai.lines,
@@ -108,7 +116,12 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
 }
 
 async function directorPass(world: WorldState, requests: PlanRequest[]): Promise<{ batch: EditBatch; lines: StatusLine[] } | null> {
-  const asked = requests.map((request) => `${request.playerName}: ${request.text}`).join("\n");
+  const asked = requests.map((request) => {
+    const selected = request.focus ? world.entities.find((entity) => entity.id === request.focus) : undefined;
+    const area = request.spot && ((request.spot.w ?? 1) > 1 || (request.spot.h ?? 1) > 1);
+    const where = [request.inside ? `inside ${request.inside}` : "", selected ? `selected ${selected.id} ${selected.label}` : "", request.spot ? (area ? `area ${request.spot.x},${request.spot.y} ${request.spot.w ?? 1} by ${request.spot.h ?? 1}` : `tile ${request.spot.x},${request.spot.y}`) : ""].filter(Boolean).join(", ");
+    return `${request.playerName}${where ? ` (${where})` : ""}: ${request.text}`;
+  }).join("\n");
   const people = who(requests);
   const merged = await complete(
     SYSTEM,
