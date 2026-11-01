@@ -39,7 +39,9 @@ export declare class WorldRoom {
         message: ChatMessage;
     };
     claimBatch(workerId: string, now?: number): ClaimedBatch | null;
-    applyEdits(batch: EditBatch, now?: number): ApplyResult;
+    applyEdits(batch: EditBatch, now?: number, options?: {
+        silent?: boolean;
+    }): ApplyResult;
     postStatus(text: string, from?: string): WorldEvent;
     releaseExpired(now?: number): number;
     onAlarm(now?: number): number;

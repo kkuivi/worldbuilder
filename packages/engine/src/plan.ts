@@ -2,6 +2,11 @@ import {
   GRID_H,
   GRID_W,
   SPRITES,
+  colorWord,
+  coloredNouns,
+  animalNames,
+  inventModel,
+  portrayal,
   type EditBatch,
   type EditOp,
   type Entity,
@@ -57,6 +62,7 @@ const PROPS: Array<[RegExp, string]> = [
   [/\b(planes?|airplanes?|jets?|helicopters?|rockets?|spaceships?)\b/i, "Plane"],
   [/\b(dragons?|dinosaurs?|monsters?)\b/i, "Dragon"],
   [/\b(horses?|ponies|pony)\b/i, "Horse"],
+  [/\b(cows?|cattle|bulls?|oxen|ox)\b/i, "Cow"],
   [/\b(birds?|eagles?|chickens?|ducks?)\b/i, "Bird"],
   [/\b(bikes?|bicycles?|motorcycles?|scooters?)\b/i, "Bike"],
   [/\btents?\b/i, "Tent"],
@@ -70,16 +76,170 @@ const PROPS: Array<[RegExp, string]> = [
   [/\b(lanterns?|lamps?)\b/i, "Lamp"],
 ];
 
+export function skyAsk(requests: PlanRequest[]): "day" | "night" | null {
+  const text = requests.map((request) => request.text).join(" \n ");
+  let sky: "day" | "night" | null = null;
+  for (const match of text.matchAll(/\b(night(?:time)?|night\s+time|after dark|moonlight|daytime|day\s+time|sunrise|morning|day)\b/gi)) {
+    const word = match[1].toLowerCase();
+    sky = word.startsWith("night") || word === "after dark" || word === "moonlight" ? "night" : "day";
+  }
+  return sky;
+}
+
+function sameKind(noun: string, label: string, sprite: SpriteId): boolean {
+  const asked = portrayal(noun);
+  if (asked === "tree" && (sprite === "tree_oak" || sprite === "tree_pine" || portrayal(label) === "tree")) return true;
+  if (asked !== "custom" && portrayal(label) === asked) return true;
+  const stem = noun.replace(/(es|s)$/, "");
+  return stem.length > 2 && `${label} ${sprite}`.toLowerCase().includes(stem);
+}
+
+export function carryColor(requests: PlanRequest[], ops: EditOp[]): EditOp[] {
+  const paints = requests.flatMap((request) => coloredNouns(request.text));
+  if (!paints.length) return ops;
+  return ops.map((op) => {
+    if (op.op !== "place" || colorWord(op.label)) return op;
+    const hit = paints.find((paint) => sameKind(paint.noun, op.label, op.sprite));
+    if (!hit) return op;
+    return { ...op, label: `${hit.color} ${op.label}`.slice(0, 40) };
+  });
+}
+
+export function supplementSky(requests: PlanRequest[], chosen: EditOp[], _local: EditOp[]): EditOp[] {
+  const wanted = skyAsk(requests);
+  if (!wanted) return chosen;
+  if (chosen.some((op) => op.op === "sky" && op.value === wanted)) return chosen;
+  const next: EditOp[] = [];
+  for (const op of chosen) if (op.op !== "sky") next.push(op);
+  next.push({ op: "sky", value: wanted });
+  return next.slice(0, 48);
+}
+
 function mentionedProps(requests: PlanRequest[]): string[] {
   const found: string[] = [];
   const text = requests.map((request) => request.text).join(" ");
   for (const [pattern, label] of PROPS) if (pattern.test(text) && !found.includes(label)) found.push(label);
+  for (const label of animalNames(text)) if (!found.includes(label)) found.push(label);
   return found;
+}
+
+const COUNTS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+
+const LANDMARKS: Record<string, string[]> = {
+  barn: ["barn", "ranch", "stable", "farmhouse", "farm"],
+  ranch: ["ranch", "barn", "farm"],
+  stable: ["stable", "barn", "ranch"],
+  skyscraper: ["skyscraper", "tower"],
+  store: ["store", "shop"],
+};
+
+function howMany(requests: PlanRequest[], label: string): number {
+  const text = requests.map((request) => request.text).join(" ");
+  const numbered = text.match(/\b(\d+|one|two|three|four|five|six|seven|eight)\b/i);
+  if (numbered) {
+    const count = COUNTS[numbered[1].toLowerCase()] ?? Number(numbered[1]);
+    if (count >= 1 && count <= 8) return count;
+  }
+  if (new RegExp(`\\b${label.toLowerCase()}s\\b|\\bcattle\\b|\\bherd\\b`, "i").test(text)) return 3;
+  return 1;
+}
+
+function named(label: string, expected: string): boolean {
+  return new RegExp(`\\b${expected}s?\\b`, "i").test(label) && label.trim().length <= expected.length + 16;
+}
+
+function landmark(requests: PlanRequest[], world: WorldState): Entity | null {
+  const text = requests.map((request) => request.text).join(" ");
+  const match = text.match(/\b(?:near|by|beside|next to|around|in front of|behind)\s+(?:the\s+)?([a-z][a-z0-9 '-]{1,32})/i);
+  if (!match?.[1]) return null;
+  const phrase = match[1].toLowerCase().split(/\b(?:and|with|so|then)\b/)[0] ?? "";
+  const keys = phrase.split(/[^a-z0-9]+/).filter((word) => word.length > 2);
+  const sentences = requests.map((request) => request.text.trim().replace(/\s+/g, " ").slice(0, 40).toLowerCase());
+  let best: { entity: Entity; score: number } | null = null;
+  for (const entity of world.entities) {
+    if (entity.sprite === "sign" && sentences.includes(entity.label.trim().toLowerCase())) continue;
+    const hay = `${entity.label} ${entity.note ?? ""} ${entity.kind} ${entity.sprite}`.toLowerCase();
+    let score = 0;
+    for (const key of keys) {
+      const names = LANDMARKS[key] ?? [key];
+      if (names.some((name) => hay.includes(name))) score += names[0] === key && hay.includes(key) ? 2 : 1;
+    }
+    if (entity.kind === "house" || entity.kind === "tower" || entity.kind === "castle") score += score > 0 ? 3 : 0;
+    if (score > 0 && (!best || score > best.score)) best = { entity, score };
+  }
+  return best?.entity ?? null;
+}
+
+function addNear(
+  world: WorldState,
+  ops: EditOp[],
+  anchor: Entity,
+  sprite: SpriteId,
+  label: string,
+  note: string | undefined,
+  terrainOk: (terrain: Terrain) => boolean,
+): void {
+  const draft = applyOps(world, ops).world;
+  const info = SPRITES[sprite];
+  let best: { x: number; y: number; dist: number } | null = null;
+  for (let y = 0; y <= GRID_H - info.h; y += 1) {
+    for (let x = 0; x <= GRID_W - info.w; x += 1) {
+      let ground = true;
+      for (let dy = 0; dy < info.h && ground; dy += 1) {
+        for (let dx = 0; dx < info.w; dx += 1) if (!terrainOk(draft.terrain[y + dy][x + dx])) ground = false;
+      }
+      if (!ground) continue;
+      const probe: Entity = {
+        id: "probe",
+        kind: info.kind,
+        x,
+        y,
+        w: info.w,
+        h: info.h,
+        sprite,
+        label,
+        createdBy: "agent",
+      };
+      if (placementError(draft, probe)) continue;
+      const dist =
+        Math.abs(x + info.w / 2 - (anchor.x + anchor.w / 2)) + Math.abs(y + info.h / 2 - (anchor.y + anchor.h / 2));
+      if (!best || dist < best.dist) best = { x, y, dist };
+    }
+  }
+  if (!best) {
+    addPlace(world, ops, sprite, label, note, terrainOk);
+    return;
+  }
+  ops.push({ op: "place", kind: info.kind, x: best.x, y: best.y, sprite, label, note, ...(sprite === "prop" ? { model: inventModel(label) } : {}) });
+}
+
+function dropSentenceSigns(world: WorldState, ops: EditOp[], requests: PlanRequest[]): void {
+  for (const request of requests) {
+    const label = request.text.trim().replace(/\s+/g, " ").slice(0, 40);
+    for (const entity of world.entities) {
+      if (entity.sprite === "sign" && entity.label === label) ops.push({ op: "remove", id: entity.id });
+    }
+  }
+}
+
+export function supplementProps(requests: PlanRequest[], chosen: EditOp[], local: EditOp[]): EditOp[] {
+  const wanted = mentionedProps(requests);
+  if (!wanted.length) return chosen;
+  const extras: EditOp[] = [];
+  for (const label of wanted) {
+    if (chosen.some((op) => op.op === "place" && named(op.label, label))) continue;
+    extras.push(...local.filter((op) => op.op === "place" && named(op.label, label)));
+  }
+  const removes = local.filter((op) => op.op === "remove");
+  if (!extras.length && removes.length === 0) return chosen;
+  return [...removes, ...chosen, ...extras].slice(0, 48);
 }
 
 function tagsFor(text: string): Set<string> {
   const found = new Set<string>();
-  const lower = text.toLowerCase();
+  const lower = text
+    .toLowerCase()
+    .replace(/\b(?:near|by|beside|next to|around|in front of|behind|across|over)\s+(?:the\s+)?[a-z0-9][a-z0-9 '-]{0,24}/g, " ");
   for (const [pattern, tag] of TAGS) if (pattern.test(lower)) found.add(tag);
   return found;
 }
@@ -199,7 +359,7 @@ function addPlace(
       ops.push({ op: "paint", x: spot.x, y: spot.y, w: info.w, h: info.h, terrain: terrainFor(terrainOk) });
     }
   }
-  ops.push({ op: "place", kind: info.kind, x: spot.x, y: spot.y, sprite, label, note });
+  ops.push({ op: "place", kind: info.kind, x: spot.x, y: spot.y, sprite, label, note, ...(sprite === "prop" ? { model: inventModel(label) } : {}) });
   return true;
 }
 
@@ -327,6 +487,7 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
   }
 
   const afterBuilds = () => applyOps(applyOps(world, terrainOps).world, buildOps).world;
+  const anchor = landmark(requests, world);
 
   if (allTags.has("village")) {
     for (let i = 0; i < 5; i += 1) {
@@ -363,7 +524,8 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
       const target = bucket === "build" ? buildOps : storyOps;
       const base = applyOps(afterBuilds(), storyOps).world;
       const titled = count > 1 ? `${label} ${i + 1}` : label;
-      addPlace(base, target, sprite, titled, note, ok);
+      if (anchor) addNear(base, target, anchor, sprite, titled, note, ok);
+      else addPlace(base, target, sprite, titled, note, ok);
     }
   }
 
@@ -389,8 +551,15 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
     }
   }
 
-  for (const label of mentionedProps(requests)) {
-    addPlace(applyOps(afterBuilds(), storyOps).world, storyOps, "sign", label, undefined, (terrain) => LAND.has(terrain));
+  const props = mentionedProps(requests);
+  if (props.length) dropSentenceSigns(world, storyOps, requests);
+  const ground = afterBuilds();
+  for (const label of props) {
+    const count = howMany(requests, label);
+    for (let i = 0; i < count; i += 1) {
+      if (anchor) addNear(ground, storyOps, anchor, "prop", label, undefined, (terrain) => LAND.has(terrain));
+      else addPlace(ground, storyOps, "prop", label, undefined, (terrain) => LAND.has(terrain));
+    }
   }
 
   if (terrainOps.length + buildOps.length + storyOps.length === 0) {
@@ -401,7 +570,9 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
     }
   }
 
-  const ops = [...terrainOps, ...buildOps, ...storyOps].slice(0, 48);
+  const sky = skyAsk(requests);
+  const skyOps: EditOp[] = sky ? [{ op: "sky", value: sky }] : [];
+  const ops = carryColor(requests, [...skyOps, ...terrainOps, ...buildOps, ...storyOps]).slice(0, 48);
   const reply = replyFor({
     wantMoat,
     wantShore,
@@ -478,9 +649,11 @@ function replyFor(input: {
   }
   const placed = [...new Set(input.ops.flatMap((op) => (op.op === "place" ? [op.label.replace(/ \d+$/, "") ] : [])))];
   const painted = [...new Set(input.ops.flatMap((op) => (op.op === "paint" ? [op.terrain] : [])))];
+  const sky = input.ops.find((op) => op.op === "sky");
   const bits = [
     placed.length ? `added ${placed.slice(0, 4).join(", ")}` : "",
     painted.length ? `painted ${painted.join(" and ")}` : "",
+    sky?.op === "sky" ? `turned the sky to ${sky.value}` : "",
   ].filter(Boolean);
   const verb = input.requests.length > 1 ? "asked together" : "asked";
   return `${input.everyone} ${verb}, so I ${bits.join(" and ")}.`;

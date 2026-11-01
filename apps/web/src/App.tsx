@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { PLAYER_COLORS, type Player, type WorldState } from "@worldbuilder/contracts";
+import { PLAYER_COLORS, type Entity, type Player, type WorldState } from "@worldbuilder/contracts";
 import { MapView } from "./MapView";
 import { useWorld } from "./useWorld";
 
@@ -24,6 +24,15 @@ function loadPlayer(): SavedPlayer | null {
 
 function savePlayer(player: SavedPlayer): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(player));
+}
+
+function shownKind(entity: Entity): string {
+  const label = entity.label.trim();
+  const made =
+    entity.sprite === "prop" ||
+    Boolean(entity.model) ||
+    (entity.sprite === "sign" && label.toLowerCase() !== "sign" && label.split(/\s+/).length <= 2);
+  return made ? "model" : entity.sprite.replaceAll("_", " ");
 }
 
 function roomFromUrl(): string {
@@ -261,7 +270,7 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
               </header>
               <p>{selected.note ?? "No story yet."}</p>
               <p className="meta">
-                {selected.sprite.replaceAll("_", " ")} · {creatorName(world, selected.createdBy)}
+                {shownKind(selected)} · {creatorName(world, selected.createdBy)}
               </p>
             </article>
           ) : null}

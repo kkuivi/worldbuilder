@@ -37,6 +37,23 @@ const LEASE_MS = 30_000;
 const MAX_CHAT = 100;
 const MAX_EVENTS = 200;
 
+function highestIssuedId(roomId: string, dump: RoomDump): number {
+  const marker = `_${roomId}_`;
+  const ids = [
+    ...dump.queue.map((request) => request.id),
+    ...dump.world.chat.flatMap((message) => [message.id, message.requestId ?? ""]),
+    ...dump.world.entities.map((entity) => entity.id),
+  ];
+  let highest = 0;
+  for (const id of ids) {
+    const at = id.lastIndexOf(marker);
+    if (at < 0) continue;
+    const issued = Number(id.slice(at + marker.length));
+    if (Number.isInteger(issued)) highest = Math.max(highest, issued);
+  }
+  return highest;
+}
+
 function hashString(value: string): number {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i += 1) {
@@ -166,6 +183,7 @@ export class WorldRoom {
     this.queue = dump.queue;
     this.events = dump.events;
     this.seq = dump.seq;
+    this.idCounter = highestIssuedId(this.id, dump);
   }
 
   started(): boolean {
@@ -254,31 +272,42 @@ export class WorldRoom {
     };
   }
 
-  applyEdits(batch: EditBatch, now = Date.now()): ApplyResult {
+  applyEdits(batch: EditBatch, now = Date.now(), options?: { silent?: boolean }): ApplyResult {
     const world = this.require();
     const known = batch.requestIds
-      .map((id) => this.queue.find((request) => request.id === id))
+      .map((id) => this.queue.find((request) => request.id === id && request.status !== "done") ?? this.queue.find((request) => request.id === id))
       .filter((request): request is QueuedRequest => Boolean(request));
-    if (batch.requestIds.length > 0 && known.length > 0 && known.every((request) => request.status === "done")) {
+    const alreadyDone = batch.requestIds.length > 0 && known.length > 0 && known.every((request) => request.status === "done");
+    if (alreadyDone && !options?.silent) {
       return { ok: true, version: world.version, applied: 0, rejected: [], stale: false };
     }
 
     const stale = batch.baseVersion !== world.version;
     const result = applyOps(world, batch.ops);
     this.world = result.world;
-    const changed = result.applied.length > 0 || batch.reply.trim().length > 0;
+    const changed = result.applied.length > 0 || (!options?.silent && batch.reply.trim().length > 0);
     if (changed) this.world.version += 1;
 
-    const message: ChatMessage = {
-      id: this.nextId("msg"),
-      seq: this.seq + 1,
-      at: new Date(now).toISOString(),
-      from: "Director",
-      role: "agent",
-      text: batch.reply.trim() || "I left the map as it was.",
-      requestId: batch.requestIds[0],
-    };
-    this.pushChat(message);
+    const message: ChatMessage = options?.silent
+      ? (this.world.chat.at(-1) ?? {
+          id: this.nextId("msg"),
+          seq: this.seq + 1,
+          at: new Date(now).toISOString(),
+          from: "Director",
+          role: "agent",
+          text: batch.reply.trim() || "I updated the map.",
+          requestId: batch.requestIds[0],
+        })
+      : {
+          id: this.nextId("msg"),
+          seq: this.seq + 1,
+          at: new Date(now).toISOString(),
+          from: "Director",
+          role: "agent",
+          text: batch.reply.trim() || "I left the map as it was.",
+          requestId: batch.requestIds[0],
+        };
+    if (!options?.silent) this.pushChat(message);
 
     for (const request of known) {
       request.status = "done";
@@ -296,6 +325,7 @@ export class WorldRoom {
 
     this.emit("edits", {
       version: this.world.version,
+      sky: this.world.sky ?? "day",
       terrain: this.world.terrain,
       entities: this.world.entities,
       message,

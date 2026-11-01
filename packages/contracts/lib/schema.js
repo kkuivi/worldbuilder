@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { SPRITE_IDS } from "./sprites.js";
-import { ENTITY_KINDS, TERRAINS } from "./types.js";
+import { ENTITY_KINDS, SKIES, TERRAINS } from "./types.js";
+const modelField = z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? undefined : value), z.string().trim().min(1).max(700).optional());
 export const terrainSchema = z.enum(TERRAINS);
+export const skySchema = z.enum(SKIES);
 export const entityKindSchema = z.enum(ENTITY_KINDS);
 export const spriteIdSchema = z.enum(SPRITE_IDS);
 export const editOpSchema = z.discriminatedUnion("op", [
@@ -14,6 +16,10 @@ export const editOpSchema = z.discriminatedUnion("op", [
         terrain: terrainSchema,
     }),
     z.object({
+        op: z.literal("sky"),
+        value: skySchema,
+    }),
+    z.object({
         op: z.literal("place"),
         kind: entityKindSchema,
         x: z.number().int(),
@@ -23,6 +29,7 @@ export const editOpSchema = z.discriminatedUnion("op", [
         sprite: spriteIdSchema,
         label: z.string().trim().min(1).max(40),
         note: z.string().trim().max(160).optional(),
+        model: modelField,
     }),
     z.object({
         op: z.literal("move"),
@@ -40,6 +47,7 @@ export const editOpSchema = z.discriminatedUnion("op", [
         label: z.string().trim().min(1).max(40).optional(),
         sprite: spriteIdSchema.optional(),
         note: z.string().trim().max(160).optional(),
+        model: modelField,
     }),
 ]);
 export const editBatchSchema = z.object({

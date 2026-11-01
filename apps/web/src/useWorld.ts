@@ -76,6 +76,7 @@ export function useWorld(roomId: string, player: Player) {
         commit({
           ...current,
           version: payload.version,
+          sky: payload.sky ?? current.sky,
           terrain: payload.terrain,
           entities: payload.entities,
           chat: appendChat(current.chat, payload.message),

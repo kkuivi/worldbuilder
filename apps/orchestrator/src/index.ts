@@ -3,7 +3,7 @@ import { networkInterfaces } from "node:os";
 import { resolve, sep } from "node:path";
 import type { Player, WorldState } from "@worldbuilder/contracts";
 import { PLAYER_COLORS } from "@worldbuilder/contracts";
-import { WorldRoom, type RoomDump } from "@worldbuilder/engine";
+import { nudgeRejectedPlaces, WorldRoom, type RoomDump } from "@worldbuilder/engine";
 import { env } from "./env";
 import { composeBatch, mirrorRelay, repairBatch } from "./llm";
 import { loadDisk, loadRecent, saveDisk, upsertWorld, writeSnapshot, type SavedRoom } from "./persist";
@@ -112,10 +112,37 @@ async function runBatch(room: WorldRoom): Promise<void> {
   void mirrorRelay(room.id, composed.lines);
 
   const before = room.currentSeq();
+  let pendingOps = composed.batch.ops;
   let result = room.applyEdits(composed.batch);
   if (result.rejected.length > 0) {
     const repaired = await repairBatch(room.view(), composed.batch, result.rejected);
-    if (repaired) result = room.applyEdits({ ...repaired, requestIds: composed.batch.requestIds, baseVersion: room.view().version });
+    if (repaired) {
+      pendingOps = repaired.ops;
+      result = room.applyEdits(
+        { ...repaired, requestIds: composed.batch.requestIds, baseVersion: room.view().version },
+        Date.now(),
+        { silent: true },
+      );
+    }
+  }
+  if (result.rejected.length > 0) {
+    const places = result.rejected.flatMap((item) => {
+      const op = pendingOps[item.index];
+      return op?.op === "place" ? [op] : [];
+    });
+    const nudged = nudgeRejectedPlaces(room.view(), places);
+    if (nudged.length > 0) {
+      result = room.applyEdits(
+        {
+          requestIds: composed.batch.requestIds,
+          baseVersion: room.view().version,
+          reply: composed.batch.reply,
+          ops: nudged,
+        },
+        Date.now(),
+        { silent: true },
+      );
+    }
   }
   broadcast(room, before);
   const next = room.view();

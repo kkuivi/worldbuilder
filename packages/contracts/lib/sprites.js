@@ -23,6 +23,7 @@ export const SPRITE_IDS = [
     "npc_child",
     "animal_cat",
     "animal_dog",
+    "prop",
 ];
 function info(kind, w, h, atlas) {
     return { kind, w, h, atlas };
@@ -51,6 +52,7 @@ export const SPRITES = {
     npc_child: info("npc", 1, 1, { x: 3, y: 8 }),
     animal_cat: info("custom", 1, 1, { x: 4, y: 8 }),
     animal_dog: info("custom", 1, 1, { x: 5, y: 8 }),
+    prop: info("custom", 1, 1, { x: 6, y: 8 }),
 };
 export function isSpriteId(value) {
     return Object.prototype.hasOwnProperty.call(SPRITES, value);

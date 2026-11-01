@@ -3,9 +3,13 @@ import {
   GRID_W,
   SPRITES,
   isSpriteId,
+  modelFor,
+  parseModel,
+  portrayal,
   type EditOp,
   type Entity,
   type EntityKind,
+  type SpriteId,
   type Terrain,
   type WorldState,
 } from "@worldbuilder/contracts";
@@ -26,6 +30,75 @@ export interface ApplyOpsResult {
 
 export function cloneWorld(world: WorldState): WorldState {
   return structuredClone(world);
+}
+
+function probeEntity(op: Extract<EditOp, { op: "place" }>, x: number, y: number): Entity | null {
+  const sprite = SPRITES[op.sprite];
+  if (!sprite) return null;
+  const label = op.label.trim();
+  if (!label) return null;
+  return {
+    id: "probe",
+    kind: sprite.kind,
+    x,
+    y,
+    w: op.w ?? sprite.w,
+    h: op.h ?? sprite.h,
+    sprite: op.sprite,
+    label,
+    createdBy: "agent",
+  };
+}
+
+function nearestOpen(world: WorldState, entity: Entity): { x: number; y: number } | null {
+  let best: { x: number; y: number; score: number } | null = null;
+  for (let y = 0; y <= GRID_H - entity.h; y += 1) {
+    for (let x = 0; x <= GRID_W - entity.w; x += 1) {
+      if (placementError(world, { ...entity, x, y })) continue;
+      const dx = x - entity.x;
+      const dy = y - entity.y;
+      const score = Math.abs(dx) + Math.abs(dy) + (dy < 0 ? 3 : 0);
+      if (!best || score < best.score) best = { x, y, score };
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+function roadRun(world: WorldState, entity: Entity, x: number, y: number): Array<{ x: number; y: number }> {
+  const along = (axis: "x" | "y") => {
+    const cells = [{ x, y }];
+    for (const step of [1, -1]) {
+      for (let i = 1; i <= 5; i += 1) {
+        const next = { x: axis === "x" ? x + step * i : x, y: axis === "y" ? y + step * i : y };
+        if (placementError(world, { ...entity, ...next })) break;
+        cells.push(next);
+      }
+    }
+    return cells;
+  };
+  const east = along("x");
+  const south = along("y");
+  return south.length > east.length ? south : east;
+}
+
+export function nudgeRejectedPlaces(world: WorldState, ops: EditOp[]): EditOp[] {
+  const draft = cloneWorld(world);
+  const fixed: EditOp[] = [];
+  for (const op of ops) {
+    if (op.op !== "place") continue;
+    const seeded = probeEntity(op, op.x, op.y);
+    if (!seeded) continue;
+    const origin = placementError(draft, seeded) ? nearestOpen(draft, seeded) : { x: op.x, y: op.y };
+    if (!origin) continue;
+    const cells = op.sprite === "road" ? roadRun(draft, { ...seeded, ...origin }, origin.x, origin.y) : [origin];
+    for (const cell of cells) {
+      const entity = probeEntity(op, cell.x, cell.y);
+      if (!entity || placementError(draft, entity)) continue;
+      draft.entities.push({ ...entity, id: `nudge_${fixed.length}` });
+      fixed.push({ ...op, x: cell.x, y: cell.y });
+    }
+  }
+  return fixed;
 }
 
 function inBounds(x: number, y: number, w: number, h: number): boolean {
@@ -81,12 +154,32 @@ function rejectPaint(world: WorldState, op: Extract<EditOp, { op: "paint" }>): s
 
 let spawnCounter = 0;
 
+function madeSprite(sprite: SpriteId, label: string, model: string | undefined): { sprite: SpriteId; model?: string } {
+  const name = label.trim();
+  const words = name.split(/\s+/);
+  const short = words.length <= 2 && name.toLowerCase() !== "sign";
+  const kind = portrayal(name);
+  if ((sprite === "prop" || sprite === "sign") && kind === "tree") {
+    return { sprite: /\bpines?\b/i.test(name) ? "tree_pine" : "tree_oak" };
+  }
+  if (sprite === "prop" || (sprite === "sign" && short)) {
+    return { sprite: "prop", model: modelFor(name, model) };
+  }
+  const supplied = model?.trim();
+  return { sprite, model: supplied && parseModel(supplied) ? supplied : undefined };
+}
+
 function nextEntityId(): string {
   spawnCounter += 1;
   return `ent_${Date.now().toString(36)}_${spawnCounter.toString(36)}`;
 }
 
 function applyOne(world: WorldState, op: EditOp, spawned: { index: number; id: string }[], index: number): string | null {
+  if (op.op === "sky") {
+    world.sky = op.value;
+    return null;
+  }
+
   if (op.op === "paint") {
     const error = rejectPaint(world, op);
     if (error) return error;
@@ -95,7 +188,8 @@ function applyOne(world: WorldState, op: EditOp, spawned: { index: number; id: s
   }
 
   if (op.op === "place") {
-    const sprite = SPRITES[op.sprite];
+    const made = madeSprite(op.sprite, op.label, op.model);
+    const sprite = SPRITES[made.sprite];
     if (!sprite) return `unknown sprite ${op.sprite}`;
     const entity: Entity = {
       id: nextEntityId(),
@@ -104,9 +198,10 @@ function applyOne(world: WorldState, op: EditOp, spawned: { index: number; id: s
       y: op.y,
       w: op.w ?? sprite.w,
       h: op.h ?? sprite.h,
-      sprite: op.sprite,
+      sprite: made.sprite,
       label: op.label.trim(),
       note: op.note?.trim() || undefined,
+      model: made.model,
       createdBy: "agent",
     };
     if (!entity.label) return "place needs a label";

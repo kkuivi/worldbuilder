@@ -3,6 +3,8 @@ export declare const GRID_W = 24;
 export declare const GRID_H = 16;
 export declare const TERRAINS: readonly ["grass", "water", "sand", "stone", "snow", "dirt"];
 export type Terrain = (typeof TERRAINS)[number];
+export declare const SKIES: readonly ["day", "night"];
+export type Sky = (typeof SKIES)[number];
 /** Surface height in world units. Water is the basin and stone is the hill. */
 export declare const TERRAIN_HEIGHT: Record<Terrain, number>;
 export declare const ENTITY_KINDS: readonly ["tree", "house", "tower", "castle", "bridge", "road", "rock", "flower", "campfire", "boat", "npc", "sign", "custom"];
@@ -17,6 +19,7 @@ export interface Entity {
     sprite: SpriteId;
     label: string;
     note?: string;
+    model?: string;
     createdBy: string;
 }
 export interface Player {
@@ -38,6 +41,7 @@ export interface WorldState {
     worldId: string;
     name: string;
     version: number;
+    sky?: Sky;
     terrain: Terrain[][];
     entities: Entity[];
     players: Player[];
@@ -58,6 +62,9 @@ export type EditOp = {
     h: number;
     terrain: Terrain;
 } | {
+    op: "sky";
+    value: Sky;
+} | {
     op: "place";
     kind: EntityKind;
     x: number;
@@ -67,6 +74,7 @@ export type EditOp = {
     sprite: SpriteId;
     label: string;
     note?: string;
+    model?: string;
 } | {
     op: "move";
     id: string;
@@ -81,6 +89,7 @@ export type EditOp = {
     label?: string;
     sprite?: SpriteId;
     note?: string;
+    model?: string;
 };
 export interface EditBatch {
     requestIds: string[];
@@ -107,6 +116,7 @@ export interface WorldEvent {
 }
 export interface EditsPayload {
     version: number;
+    sky?: Sky;
     terrain: Terrain[][];
     entities: Entity[];
     message: ChatMessage;

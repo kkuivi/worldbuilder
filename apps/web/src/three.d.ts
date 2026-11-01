@@ -22,6 +22,7 @@ declare module "three" {
 
   export class Color {
     constructor(color?: number | string);
+    set(color: number | string): this;
   }
 
   export class Clock {
@@ -63,11 +64,15 @@ declare module "three" {
     updateProjectionMatrix(): void;
   }
 
-  export class Light extends Object3D {}
+  export class Light extends Object3D {
+    color: Color;
+    intensity: number;
+  }
   export class AmbientLight extends Light {
     constructor(color?: number, intensity?: number);
   }
   export class HemisphereLight extends Light {
+    groundColor: Color;
     constructor(skyColor?: number, groundColor?: number, intensity?: number);
   }
   export class DirectionalLight extends Light {

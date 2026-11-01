@@ -26,6 +26,7 @@ export const SPRITE_IDS = [
   "npc_child",
   "animal_cat",
   "animal_dog",
+  "prop",
 ] as const;
 
 export type SpriteId = (typeof SPRITE_IDS)[number];
@@ -65,6 +66,7 @@ export const SPRITES: Record<SpriteId, SpriteInfo> = {
   npc_child: info("npc", 1, 1, { x: 3, y: 8 }),
   animal_cat: info("custom", 1, 1, { x: 4, y: 8 }),
   animal_dog: info("custom", 1, 1, { x: 5, y: 8 }),
+  prop: info("custom", 1, 1, { x: 6, y: 8 }),
 };
 
 export function isSpriteId(value: string): value is SpriteId {

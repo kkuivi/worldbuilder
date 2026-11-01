@@ -13,5 +13,6 @@ export interface ApplyOpsResult {
     }[];
 }
 export declare function cloneWorld(world: WorldState): WorldState;
+export declare function nudgeRejectedPlaces(world: WorldState, ops: EditOp[]): EditOp[];
 export declare function placementError(world: WorldState, entity: Entity, ignoreId?: string): string | null;
 export declare function applyOps(world: WorldState, ops: EditOp[]): ApplyOpsResult;

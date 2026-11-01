@@ -1,6 +1,7 @@
 export const GRID_W = 24;
 export const GRID_H = 16;
 export const TERRAINS = ["grass", "water", "sand", "stone", "snow", "dirt"];
+export const SKIES = ["day", "night"];
 /** Surface height in world units. Water is the basin and stone is the hill. */
 export const TERRAIN_HEIGHT = {
     water: 0.18,

@@ -32,6 +32,7 @@ const SPRITE_CHAR = {
     npc_child: "c",
     animal_cat: "a",
     animal_dog: "g",
+    prop: "q",
 };
 export function renderDigest(world) {
     const width = world.terrain[0]?.length ?? 0;
@@ -73,7 +74,7 @@ export function renderDigest(world) {
         .map(([name]) => name)
         .join(", ");
     return [
-        `World ${world.name} (${world.worldId}) version ${world.version}. Grid ${width} wide by ${height} tall. Origin is the top left.`,
+        `World ${world.name} (${world.worldId}) version ${world.version}. Grid ${width} wide by ${height} tall. Origin is the top left. Sky is ${world.sky ?? "day"}.`,
         `Height, lowest to highest: ${heights}. Objects stand on the tiles under them. Painting a tile changes its height.`,
         `Players: ${players}`,
         `Sprites: ${spriteList}`,

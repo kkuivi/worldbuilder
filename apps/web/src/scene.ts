@@ -4,7 +4,13 @@ import {
   GRID_H,
   GRID_W,
   TERRAIN_HEIGHT,
+  inventModel,
+  modelFor,
+  namedColor,
+  parseModel,
+  portrayal,
   type Entity,
+  type ModelPart,
   type SpriteId,
   type Terrain,
   type WorldState,
@@ -68,11 +74,33 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     userMoved = true;
   });
 
-  scene.add(new THREE.HemisphereLight(0xd6ecff, 0x6a8f4a, 0.55));
-  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const hemi = new THREE.HemisphereLight(0xd6ecff, 0x6a8f4a, 0.55);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
   const sun = new THREE.DirectionalLight(0xfff6e4, 1.25);
   sun.position.set(8, 18, 10);
-  scene.add(sun);
+  const stars = new THREE.Group();
+  for (let i = 0; i < 40; i += 1) {
+    const star = new THREE.Mesh(new THREE.SphereGeometry(0.045, 4, 4), new THREE.MeshBasicMaterial({ color: 0xfff6d8 }));
+    const angle = (i / 40) * Math.PI * 2;
+    const radius = 7 + (i % 6) * 1.6;
+    star.position.set(GRID_W / 2 + Math.cos(angle) * radius, 7 + (i % 4) * 0.7, GRID_H / 2 + Math.sin(angle) * radius * 0.55);
+    stars.add(star);
+  }
+  stars.visible = false;
+  scene.add(hemi, ambient, sun, stars);
+
+  function applySky(sky: WorldState["sky"]) {
+    const night = sky === "night";
+    renderer.setClearColor(night ? 0x0b1020 : 0xb7d4ec);
+    hemi.color.set(night ? 0x243456 : 0xd6ecff);
+    hemi.groundColor.set(night ? 0x12160f : 0x6a8f4a);
+    hemi.intensity = night ? 0.28 : 0.55;
+    ambient.color.set(night ? 0x8ea0c4 : 0xffffff);
+    ambient.intensity = night ? 0.16 : 0.35;
+    sun.color.set(night ? 0xb7c7e6 : 0xfff6e4);
+    sun.intensity = night ? 0.28 : 1.25;
+    stars.visible = night;
+  }
 
   const terrain = new THREE.Group();
   const props = new THREE.Group();
@@ -281,6 +309,7 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
       world = next;
       selectedId = nextSelected;
       births = nextBirths;
+      applySky(next.sky);
       if (next.version !== builtVersion) {
         rebuild();
         builtVersion = next.version;
@@ -320,6 +349,12 @@ function buildEntity(entity: Entity) {
   group.userData.id = entity.id;
   const sx = entity.w * 0.86;
   const sz = entity.h * 0.86;
+  const spec = modelSpec(entity);
+  if (spec) {
+    drawModel(group, spec);
+    group.rotation.y = yaw(entity.id);
+    return group;
+  }
   const kind = likeness(entity.label) ?? (entity.sprite === "sign" ? likeness(entity.note ?? "") : null);
   if (kind) {
     drawLikeness(group, kind, `${entity.label} ${entity.note ?? ""}`);
@@ -328,26 +363,30 @@ function buildEntity(entity: Entity) {
     drawVaried(group, entity.label);
     group.rotation.y = yaw(entity.id);
   } else {
-    shape(group, entity.sprite, sx, sz);
+    shape(group, entity.sprite, sx, sz, entity.label);
     if (SPIN.has(entity.sprite)) group.rotation.y = yaw(entity.id);
   }
   return group;
 }
 
-function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number) {
+function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number, label = "") {
   switch (sprite) {
     case "tree_oak": {
       const radius = Math.max(sx, sz) * 0.46;
+      const leaf = namedColor(label) ?? 0x2f8f3a;
+      const tip = namedColor(label) ?? 0x8ed56a;
       cylinder(group, radius * 0.22, 0.75, 0x5c3a22, 0, 0.38, 0);
-      sphere(group, radius, 0x2f8f3a, 0, 1.05, 0);
-      sphere(group, radius * 0.62, 0x8ed56a, radius * 0.28, 1.28, radius * 0.08);
+      sphere(group, radius, leaf, 0, 1.05, 0);
+      sphere(group, radius * 0.62, tip, radius * 0.28, 1.28, radius * 0.08);
       return;
     }
     case "tree_pine": {
       const radius = Math.max(sx, sz) * 0.42;
+      const leaf = namedColor(label) ?? 0x1d5c28;
+      const tip = namedColor(label) ?? 0x2f8f3a;
       cylinder(group, radius * 0.2, 0.5, 0x5c3a22, 0, 0.25, 0);
-      cone(group, radius, 1.15, 0x1d5c28, 0, 1.05, 0);
-      cone(group, radius * 0.72, 0.7, 0x2f8f3a, 0, 1.55, 0);
+      cone(group, radius, 1.15, leaf, 0, 1.05, 0);
+      cone(group, radius * 0.72, 0.7, tip, 0, 1.55, 0);
       return;
     }
     case "bush":
@@ -416,9 +455,14 @@ function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number) {
       box(group, sx, 0.16, 0.08, 0x8d5a32, 0, 0.26, sz * 0.28);
       box(group, sx, 0.16, 0.08, 0x8d5a32, 0, 0.26, -sz * 0.28);
       return;
-    case "road":
-      box(group, 0.92, 0.08, 0.92, 0x8d643c, 0, 0.05, 0);
+    case "road": {
+      const length = Math.max(sx, 0.92);
+      const width = Math.max(Math.min(sx, sz) * 0.55, 0.46);
+      const alongX = sx >= sz;
+      box(group, alongX ? length : width, 0.12, alongX ? width : length, 0x5a5146, 0, 0.1, 0);
+      box(group, alongX ? length * 0.86 : 0.1, 0.03, alongX ? 0.1 : length * 0.86, 0xe7d7a8, 0, 0.17, 0);
       return;
+    }
     case "sign":
       cylinder(group, 0.05, 0.7, 0x8d5a32, 0, 0.35, 0);
       box(group, 0.46, 0.28, 0.06, 0xf6e6c8, 0, 0.62, 0.04);
@@ -429,6 +473,7 @@ function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number) {
       const right = box(group, 0.42, 0.08, 0.1, 0x8d5a32, 0, 0.12, 0);
       right.rotation.y = -0.6;
       const flame = cone(group, 0.12, 0.34, 0xff8a3d, 0, 0.34, 0);
+      flame.material = new THREE.MeshBasicMaterial({ color: 0xff8a3d });
       flame.userData.flame = true;
       return;
     }
@@ -468,6 +513,7 @@ const LIKENESSES: Array<[RegExp, string]> = [
   [/\b(planes?|airplanes?|jets?|helicopters?|rockets?|spaceships?)\b/i, "plane"],
   [/\b(dragons?|dinosaurs?|monsters?)\b/i, "dragon"],
   [/\b(horses?|ponies|pony)\b/i, "horse"],
+  [/\b(cows?|cattle|bulls?|oxen|ox)\b/i, "cow"],
   [/\b(birds?|eagles?|chickens?|ducks?)\b/i, "bird"],
   [/\b(bikes?|bicycles?|motorcycles?|scooters?)\b/i, "bike"],
   [/\btents?\b/i, "tent"],
@@ -480,6 +526,26 @@ const LIKENESSES: Array<[RegExp, string]> = [
   [/\bbenches\b|\bbench\b/i, "bench"],
   [/\b(lanterns?|lamps?)\b/i, "lamp"],
 ];
+
+function modelSpec(entity: Entity): ModelPart[] | null {
+  const label = entity.label.trim();
+  const known = portrayal(label) !== "custom";
+  const catalogTree = entity.sprite === "tree_oak" || entity.sprite === "tree_pine";
+  if (known && !catalogTree) return parseModel(inventModel(label));
+  if (entity.sprite === "prop" || (entity.sprite === "sign" && label.split(/\s+/).length <= 2 && label.toLowerCase() !== "sign")) {
+    return parseModel(modelFor(label, entity.model));
+  }
+  return null;
+}
+
+function drawModel(group: THREE.Group, parts: ModelPart[]) {
+  for (const part of parts) {
+    if (part.shape === "box") box(group, part.a, part.b, part.c, part.color, part.x, part.y, part.z);
+    else if (part.shape === "sphere") sphere(group, part.a, part.color, part.x, part.y, part.z);
+    else if (part.shape === "cone") cone(group, part.a, part.b, part.color, part.x, part.y, part.z);
+    else cylinder(group, part.a, part.b, part.color, part.x, part.y, part.z);
+  }
+}
 
 function likeness(text: string): string | null {
   for (const [pattern, kind] of LIKENESSES) if (pattern.test(text)) return kind;
@@ -499,6 +565,9 @@ function drawLikeness(group: THREE.Group, kind: string, text: string) {
       return;
     case "horse":
       horse(group, text);
+      return;
+    case "cow":
+      cow(group, text);
       return;
     case "bird":
       bird(group, text);
@@ -576,6 +645,21 @@ function dragon(group: THREE.Group, text: string) {
   box(group, 0.5, 0.04, 0.32, 0x1d5c28, -0.02, 0.52, 0.34);
   box(group, 0.5, 0.04, 0.32, 0x1d5c28, -0.02, 0.52, -0.34);
   box(group, 0.38, 0.08, 0.08, color, -0.52, 0.32, 0);
+}
+
+function cow(group: THREE.Group, text: string) {
+  const hide = tint(text, 0xf7f4ee);
+  box(group, 0.72, 0.28, 0.36, hide, 0, 0.42, 0);
+  box(group, 0.16, 0.08, 0.14, 0x2c2c2c, -0.12, 0.58, 0.06);
+  box(group, 0.12, 0.08, 0.1, 0x2c2c2c, 0.16, 0.58, -0.08);
+  box(group, 0.22, 0.16, 0.18, hide, 0.44, 0.52, 0);
+  sphere(group, 0.05, 0xf2b8c6, 0.56, 0.48, 0);
+  cone(group, 0.03, 0.12, 0xf6e6c8, 0.4, 0.68, 0.06);
+  cone(group, 0.03, 0.12, 0xf6e6c8, 0.4, 0.68, -0.06);
+  sphere(group, 0.08, 0xf2b8c6, -0.06, 0.26, 0);
+  for (const x of [-0.22, 0.18]) {
+    for (const z of [-0.12, 0.12]) box(group, 0.07, 0.28, 0.07, hide, x, 0.14, z);
+  }
 }
 
 function horse(group: THREE.Group, text: string) {

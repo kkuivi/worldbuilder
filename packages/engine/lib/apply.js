@@ -1,7 +1,81 @@
-import { GRID_H, GRID_W, SPRITES, isSpriteId, } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, SPRITES, isSpriteId, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
 const WATER_FORBIDDEN = new Set(["house", "tower", "castle", "tree"]);
 export function cloneWorld(world) {
     return structuredClone(world);
+}
+function probeEntity(op, x, y) {
+    const sprite = SPRITES[op.sprite];
+    if (!sprite)
+        return null;
+    const label = op.label.trim();
+    if (!label)
+        return null;
+    return {
+        id: "probe",
+        kind: sprite.kind,
+        x,
+        y,
+        w: op.w ?? sprite.w,
+        h: op.h ?? sprite.h,
+        sprite: op.sprite,
+        label,
+        createdBy: "agent",
+    };
+}
+function nearestOpen(world, entity) {
+    let best = null;
+    for (let y = 0; y <= GRID_H - entity.h; y += 1) {
+        for (let x = 0; x <= GRID_W - entity.w; x += 1) {
+            if (placementError(world, { ...entity, x, y }))
+                continue;
+            const dx = x - entity.x;
+            const dy = y - entity.y;
+            const score = Math.abs(dx) + Math.abs(dy) + (dy < 0 ? 3 : 0);
+            if (!best || score < best.score)
+                best = { x, y, score };
+        }
+    }
+    return best ? { x: best.x, y: best.y } : null;
+}
+function roadRun(world, entity, x, y) {
+    const along = (axis) => {
+        const cells = [{ x, y }];
+        for (const step of [1, -1]) {
+            for (let i = 1; i <= 5; i += 1) {
+                const next = { x: axis === "x" ? x + step * i : x, y: axis === "y" ? y + step * i : y };
+                if (placementError(world, { ...entity, ...next }))
+                    break;
+                cells.push(next);
+            }
+        }
+        return cells;
+    };
+    const east = along("x");
+    const south = along("y");
+    return south.length > east.length ? south : east;
+}
+export function nudgeRejectedPlaces(world, ops) {
+    const draft = cloneWorld(world);
+    const fixed = [];
+    for (const op of ops) {
+        if (op.op !== "place")
+            continue;
+        const seeded = probeEntity(op, op.x, op.y);
+        if (!seeded)
+            continue;
+        const origin = placementError(draft, seeded) ? nearestOpen(draft, seeded) : { x: op.x, y: op.y };
+        if (!origin)
+            continue;
+        const cells = op.sprite === "road" ? roadRun(draft, { ...seeded, ...origin }, origin.x, origin.y) : [origin];
+        for (const cell of cells) {
+            const entity = probeEntity(op, cell.x, cell.y);
+            if (!entity || placementError(draft, entity))
+                continue;
+            draft.entities.push({ ...entity, id: `nudge_${fixed.length}` });
+            fixed.push({ ...op, x: cell.x, y: cell.y });
+        }
+    }
+    return fixed;
 }
 function inBounds(x, y, w, h) {
     return x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= GRID_W && y + h <= GRID_H;
@@ -52,11 +126,29 @@ function rejectPaint(world, op) {
     return world.terrain[op.y]?.[op.x] ? null : "paint is outside the grid";
 }
 let spawnCounter = 0;
+function madeSprite(sprite, label, model) {
+    const name = label.trim();
+    const words = name.split(/\s+/);
+    const short = words.length <= 2 && name.toLowerCase() !== "sign";
+    const kind = portrayal(name);
+    if ((sprite === "prop" || sprite === "sign") && kind === "tree") {
+        return { sprite: /\bpines?\b/i.test(name) ? "tree_pine" : "tree_oak" };
+    }
+    if (sprite === "prop" || (sprite === "sign" && short)) {
+        return { sprite: "prop", model: modelFor(name, model) };
+    }
+    const supplied = model?.trim();
+    return { sprite, model: supplied && parseModel(supplied) ? supplied : undefined };
+}
 function nextEntityId() {
     spawnCounter += 1;
     return `ent_${Date.now().toString(36)}_${spawnCounter.toString(36)}`;
 }
 function applyOne(world, op, spawned, index) {
+    if (op.op === "sky") {
+        world.sky = op.value;
+        return null;
+    }
     if (op.op === "paint") {
         const error = rejectPaint(world, op);
         if (error)
@@ -66,7 +158,8 @@ function applyOne(world, op, spawned, index) {
         return null;
     }
     if (op.op === "place") {
-        const sprite = SPRITES[op.sprite];
+        const made = madeSprite(op.sprite, op.label, op.model);
+        const sprite = SPRITES[made.sprite];
         if (!sprite)
             return `unknown sprite ${op.sprite}`;
         const entity = {
@@ -76,9 +169,10 @@ function applyOne(world, op, spawned, index) {
             y: op.y,
             w: op.w ?? sprite.w,
             h: op.h ?? sprite.h,
-            sprite: op.sprite,
+            sprite: made.sprite,
             label: op.label.trim(),
             note: op.note?.trim() || undefined,
+            model: made.model,
             createdBy: "agent",
         };
         if (!entity.label)

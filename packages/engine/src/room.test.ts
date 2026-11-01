@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { TERRAIN_HEIGHT, renderDigest } from "@worldbuilder/contracts";
-import { planBatch } from "./plan.js";
+import { TERRAIN_HEIGHT, editBatchSchema, inventModel, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
+import { nudgeRejectedPlaces } from "./apply.js";
+import { carryColor, planBatch, supplementProps } from "./plan.js";
 import { WorldRoom } from "./room.js";
 
 function named(room: WorldRoom, requests: Array<{ id: string; playerId: string; text: string }>) {
@@ -73,6 +74,20 @@ describe("world room", () => {
     });
     expect(again.applied).toBe(0);
     expect(room.view().version).toBe(2);
+
+    const repaired = room.applyEdits(
+      {
+        requestIds: claimed!.requests.map((request) => request.id),
+        baseVersion: 2,
+        reply: "the road",
+        ops: [{ op: "paint", x: 2, y: 2, w: 3, h: 1, terrain: "dirt" }, { op: "place", kind: "road", x: 2, y: 2, sprite: "road", label: "Road" }],
+      },
+      Date.now(),
+      { silent: true },
+    );
+    expect(repaired.applied).toBe(2);
+    expect(room.view().entities.some((entity) => entity.sprite === "road" && entity.label === "Road")).toBe(true);
+    expect(room.view().chat.filter((message) => message.text === "the road")).toHaveLength(0);
   });
 
   test("returns a claim to the queue after the lease", () => {
@@ -160,7 +175,169 @@ describe("world room", () => {
     const garage = planBatch(world, [
       { id: "r3", playerId: "a", playerName: "Elikem 2", text: "Add a red car" },
     ]);
-    expect(garage.batch.ops.some((op) => op.op === "place" && op.label === "Car")).toBe(true);
+    expect(garage.batch.ops.some((op) => op.op === "place" && op.label === "Red Car")).toBe(true);
     expect(garage.batch.reply).not.toMatch(/breaking the map|smaller change/i);
+  });
+
+  test("keeps issuing new request ids after a reload", () => {
+    const room = new WorldRoom("NADL");
+    room.start("city");
+    room.join({ id: "a", name: "Ada", color: "#e85d4c", joinedAt: new Date().toISOString() });
+    room.say("a", "add a skyscraper");
+    const restored = new WorldRoom("NADL");
+    restored.load(room.dump());
+    restored.join({ id: "a", name: "Ada", color: "#e85d4c", joinedAt: new Date().toISOString() });
+    const said = restored.say("a", "add a road in front of the skyscraper");
+    expect(said.requestId).not.toBe("req_NADL_1");
+  });
+
+  test("puts a rejected road on open ground beside the building", () => {
+    const room = new WorldRoom("ROAD");
+    room.start("city");
+    room.join({ id: "a", name: "Ada", color: "#e85d4c", joinedAt: new Date().toISOString() });
+    room.say("a", "add a skyscraper");
+    const claimed = room.claimBatch("worker");
+    const cleared = room.applyEdits({
+      requestIds: claimed!.requests.map((request) => request.id),
+      baseVersion: room.view().version,
+      reply: "the tower",
+      ops: [
+        ...room.view().entities.map((entity) => ({ op: "remove" as const, id: entity.id })),
+        { op: "place" as const, kind: "tower" as const, x: 10, y: 0, sprite: "tower" as const, label: "Skyscraper" },
+      ],
+    });
+    expect(cleared.rejected).toEqual([]);
+    const nudged = nudgeRejectedPlaces(room.view(), [
+      { op: "place", kind: "road", x: 10, y: 0, sprite: "road", label: "Road" },
+    ]);
+    expect(nudged.length).toBeGreaterThan(1);
+    expect(nudged.every((op) => op.op === "place" && !(op.x >= 10 && op.x <= 11 && op.y >= 0 && op.y <= 1))).toBe(true);
+    const landed = room.applyEdits(
+      {
+        requestIds: claimed!.requests.map((request) => request.id),
+        baseVersion: room.view().version,
+        reply: "the road",
+        ops: nudged,
+      },
+      Date.now(),
+      { silent: true },
+    );
+    expect(landed.rejected).toEqual([]);
+    expect(room.view().entities.filter((entity) => entity.sprite === "road").length).toBe(nudged.length);
+  });
+
+  test("puts several cows beside the barn", () => {
+    const room = new WorldRoom("COWS");
+    const world = room.start("city");
+    for (const row of world.terrain) row.fill("grass");
+    world.entities = [
+      {
+        id: "barn",
+        kind: "house",
+        x: 18,
+        y: 12,
+        w: 3,
+        h: 2,
+        sprite: "house_large",
+        label: "Ranch",
+        createdBy: "agent",
+      },
+      {
+        id: "note",
+        kind: "sign",
+        x: 8,
+        y: 5,
+        w: 1,
+        h: 1,
+        sprite: "sign",
+        label: "add cows near the barn",
+        createdBy: "agent",
+      },
+    ];
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "Jonnyy", text: "add cows near the barn" }]);
+    const cows = plan.batch.ops.filter((op) => op.op === "place" && op.label === "Cow");
+    expect(cows).toHaveLength(3);
+    for (const cow of cows) {
+      if (cow.op !== "place") continue;
+      expect(cow.sprite).toBe("prop");
+      expect(parseModel(cow.model ?? "")?.some((part) => part.shape === "cylinder")).toBe(true);
+    }
+    for (const cow of cows) {
+      if (cow.op !== "place") continue;
+      expect(cow.x).toBeGreaterThan(15);
+      expect(cow.x).toBeLessThan(23);
+      expect(cow.y).toBeGreaterThan(9);
+      expect(cow.y).toBeLessThan(16);
+      expect(cow.x >= 18 && cow.x <= 20 && cow.y >= 12 && cow.y <= 13).toBe(false);
+    }
+    expect(plan.batch.ops.some((op) => op.op === "remove" && op.id === "note")).toBe(true);
+    const filled = supplementProps(
+      [{ id: "r", playerId: "a", playerName: "Jonnyy", text: "add cows near the barn" }],
+      [],
+      plan.batch.ops,
+    );
+    expect(filled.filter((op) => op.op === "place" && op.label === "Cow")).toHaveLength(3);
+  });
+
+  test("turns the sky to night when asked", () => {
+    const room = new WorldRoom("NIGHT");
+    const world = room.start("city");
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "Jonnyy", text: "make it night time" }]);
+    expect(plan.batch.ops.some((op) => op.op === "sky" && op.value === "night")).toBe(true);
+    room.join({ id: "a", name: "Jonnyy", color: "#e85d4c", joinedAt: new Date().toISOString() });
+    room.say("a", "make it night time");
+    const claimed = room.claimBatch("worker");
+    const applied = room.applyEdits({ ...plan.batch, requestIds: claimed!.requests.map((request) => request.id), baseVersion: room.view().version });
+    expect(applied.rejected).toEqual([]);
+    expect(room.view().sky).toBe("night");
+  });
+
+  test("keeps the requested color on the trees", () => {
+    const room = new WorldRoom("TINT");
+    const world = room.start("city");
+    const request = { id: "r", playerId: "a", playerName: "Jonnyy", text: "add blue trees" };
+    const plan = planBatch(world, [request]);
+    const trees = plan.batch.ops.filter((op) => op.op === "place" && (op.sprite === "tree_oak" || op.sprite === "tree_pine"));
+    expect(trees.length).toBeGreaterThan(0);
+    for (const tree of trees) {
+      if (tree.op !== "place") continue;
+      expect(namedColor(tree.label)).toBe(0x3b6fe0);
+    }
+    const carried = carryColor([request], [{ op: "place", kind: "tree", x: 1, y: 1, sprite: "tree_oak", label: "Oak" }]);
+    expect(carried[0]).toMatchObject({ label: "Blue Oak" });
+  });
+
+  test("builds an animal with legs instead of a crate", () => {
+    const boxes = "box 0.4 0.4 0.4 888888 0 0.2 0\nbox 0.2 0.2 0.2 888888 0 0.5 0\nbox 0.1 0.1 0.1 888888 0 0.7 0";
+    expect(portrayal("Elephant")).toBe("animal");
+    expect(modelFor("Elephant", boxes)).toBe(inventModel("Elephant"));
+    const elephant = parseModel(inventModel("Elephant"));
+    expect(elephant?.some((part) => part.shape === "cylinder")).toBe(true);
+    expect(elephant?.some((part) => part.shape === "box" && part.b > part.a && part.x > 0.5)).toBe(true);
+    const giraffe = parseModel(inventModel("Giraffe"));
+    expect(giraffe?.some((part) => part.y > 1)).toBe(true);
+    const snake = parseModel(inventModel("Snake"));
+    expect(snake?.every((part) => part.shape !== "box")).toBe(true);
+    const room = new WorldRoom("ANIM");
+    const world = room.start("city");
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "Jonnyy", text: "add an elephant near the river" }]);
+    expect(plan.batch.ops.some((op) => op.op === "place" && op.label === "Elephant")).toBe(true);
+    expect(plan.batch.ops.some((op) => op.op === "paint" && op.terrain === "water")).toBe(false);
+    const parsed = editBatchSchema.safeParse({
+      requestIds: ["r"],
+      baseVersion: 1,
+      reply: "Added an elephant.",
+      ops: [{ op: "place", kind: "custom", x: 1, y: 1, sprite: "prop", label: "Elephant", model: "" }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("replaces a stack of boxes with a blue tree", () => {
+    const boxes = "box 0.5 2 0.5 0000FF 0 0 0\nbox 0.4 1 0.4 0000FF 0 1 0";
+    expect(portrayal("Blue Tree")).toBe("tree");
+    expect(modelFor("Blue Tree", boxes)).toBe(inventModel("Blue Tree"));
+    const parts = parseModel(inventModel("Blue Tree"));
+    expect(parts?.some((part) => part.shape === "sphere" && part.color === 0x3b6fe0)).toBe(true);
+    expect(parts?.some((part) => part.shape === "cylinder")).toBe(true);
   });
 });
