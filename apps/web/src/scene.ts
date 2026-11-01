@@ -320,8 +320,17 @@ function buildEntity(entity: Entity) {
   group.userData.id = entity.id;
   const sx = entity.w * 0.86;
   const sz = entity.h * 0.86;
-  shape(group, entity.sprite, sx, sz);
-  if (SPIN.has(entity.sprite)) group.rotation.y = yaw(entity.id);
+  const kind = likeness(entity.label) ?? (entity.sprite === "sign" ? likeness(entity.note ?? "") : null);
+  if (kind) {
+    drawLikeness(group, kind, `${entity.label} ${entity.note ?? ""}`);
+    group.rotation.y = yaw(entity.id);
+  } else if (entity.sprite === "sign" && entity.label.trim().toLowerCase() !== "sign") {
+    drawVaried(group, entity.label);
+    group.rotation.y = yaw(entity.id);
+  } else {
+    shape(group, entity.sprite, sx, sz);
+    if (SPIN.has(entity.sprite)) group.rotation.y = yaw(entity.id);
+  }
   return group;
 }
 
@@ -449,8 +458,249 @@ function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number) {
       animal(group, 0x8d643c, 0.85);
       return;
     default:
-      box(group, sx, 0.4, sz, 0xc5ced6, 0, 0.2, 0);
+      cylinder(group, Math.min(sx, sz) * 0.32, 0.42, 0xc5ced6, 0, 0.21, 0);
+      sphere(group, Math.min(sx, sz) * 0.22, 0xefb423, 0, 0.5, 0);
   }
+}
+
+const LIKENESSES: Array<[RegExp, string]> = [
+  [/\b(cars?|trucks?|bus|buses|vans?|taxi|jeeps?|automobiles?|wagons?)\b/i, "car"],
+  [/\b(planes?|airplanes?|jets?|helicopters?|rockets?|spaceships?)\b/i, "plane"],
+  [/\b(dragons?|dinosaurs?|monsters?)\b/i, "dragon"],
+  [/\b(horses?|ponies|pony)\b/i, "horse"],
+  [/\b(birds?|eagles?|chickens?|ducks?)\b/i, "bird"],
+  [/\b(bikes?|bicycles?|motorcycles?|scooters?)\b/i, "bike"],
+  [/\btents?\b/i, "tent"],
+  [/\b(fish|fishes|sharks?|whales?)\b/i, "fish"],
+  [/\b(robots?|androids?)\b/i, "robot"],
+  [/\b(barrels?|kegs?)\b/i, "barrel"],
+  [/\b(chests?|treasures?)\b/i, "chest"],
+  [/\b(statues?|monuments?)\b/i, "statue"],
+  [/\bballoons?\b/i, "balloon"],
+  [/\bbenches\b|\bbench\b/i, "bench"],
+  [/\b(lanterns?|lamps?)\b/i, "lamp"],
+];
+
+function likeness(text: string): string | null {
+  for (const [pattern, kind] of LIKENESSES) if (pattern.test(text)) return kind;
+  return null;
+}
+
+function drawLikeness(group: THREE.Group, kind: string, text: string) {
+  switch (kind) {
+    case "car":
+      car(group, text);
+      return;
+    case "plane":
+      plane(group, text);
+      return;
+    case "dragon":
+      dragon(group, text);
+      return;
+    case "horse":
+      horse(group, text);
+      return;
+    case "bird":
+      bird(group, text);
+      return;
+    case "bike":
+      bike(group, text);
+      return;
+    case "tent":
+      tent(group, text);
+      return;
+    case "fish":
+      fish(group, text);
+      return;
+    case "robot":
+      robot(group, text);
+      return;
+    case "barrel":
+      barrel(group, text);
+      return;
+    case "chest":
+      chest(group, text);
+      return;
+    case "statue":
+      statue(group, text);
+      return;
+    case "balloon":
+      balloon(group, text);
+      return;
+    case "bench":
+      bench(group, text);
+      return;
+    case "lamp":
+      lamp(group, text);
+      return;
+    default:
+      drawVaried(group, text);
+  }
+}
+
+function wheel(group: THREE.Group, x: number, y: number, z: number) {
+  const mesh = cylinder(group, 0.13, 0.08, 0x2c2c2c, x, y, z);
+  mesh.rotation.x = Math.PI / 2;
+  return mesh;
+}
+
+function car(group: THREE.Group, text: string) {
+  const paint = tint(text, 0xc23b3b);
+  box(group, 1.2, 0.28, 0.56, paint, 0, 0.28, 0);
+  box(group, 0.48, 0.22, 0.48, 0xd7e4ef, -0.08, 0.5, 0);
+  box(group, 0.08, 0.08, 0.1, 0xf4f1c8, 0.58, 0.32, 0.16);
+  box(group, 0.08, 0.08, 0.1, 0xf4f1c8, 0.58, 0.32, -0.16);
+  wheel(group, 0.36, 0.13, 0.28);
+  wheel(group, 0.36, 0.13, -0.28);
+  wheel(group, -0.36, 0.13, 0.28);
+  wheel(group, -0.36, 0.13, -0.28);
+}
+
+function plane(group: THREE.Group, text: string) {
+  const paint = tint(text, 0xf4f8fc);
+  box(group, 1.05, 0.16, 0.2, paint, 0, 0.46, 0);
+  box(group, 0.28, 0.04, 1.15, paint, 0.08, 0.46, 0);
+  box(group, 0.16, 0.16, 0.36, paint, -0.48, 0.56, 0);
+  const nose = cone(group, 0.1, 0.24, 0x66717c, 0.64, 0.46, 0);
+  nose.rotation.z = -Math.PI / 2;
+}
+
+function dragon(group: THREE.Group, text: string) {
+  const color = tint(text, 0x2f8f3a);
+  box(group, 0.72, 0.26, 0.32, color, 0, 0.34, 0);
+  sphere(group, 0.16, color, 0.46, 0.48, 0);
+  cone(group, 0.05, 0.16, color, 0.5, 0.66, 0.07);
+  cone(group, 0.05, 0.16, color, 0.5, 0.66, -0.07);
+  const snout = cone(group, 0.07, 0.18, 0xe85d4c, 0.64, 0.46, 0);
+  snout.rotation.z = -Math.PI / 2;
+  box(group, 0.5, 0.04, 0.32, 0x1d5c28, -0.02, 0.52, 0.34);
+  box(group, 0.5, 0.04, 0.32, 0x1d5c28, -0.02, 0.52, -0.34);
+  box(group, 0.38, 0.08, 0.08, color, -0.52, 0.32, 0);
+}
+
+function horse(group: THREE.Group, text: string) {
+  const color = tint(text, 0x8d5a32);
+  box(group, 0.62, 0.22, 0.24, color, 0, 0.44, 0);
+  box(group, 0.12, 0.28, 0.12, color, 0.32, 0.62, 0);
+  sphere(group, 0.12, color, 0.4, 0.8, 0);
+  box(group, 0.16, 0.05, 0.05, color, -0.38, 0.48, 0);
+  for (const x of [-0.18, 0.16]) {
+    for (const z of [-0.09, 0.09]) box(group, 0.06, 0.32, 0.06, 0x5c3a22, x, 0.16, z);
+  }
+}
+
+function bird(group: THREE.Group, text: string) {
+  const color = tint(text, 0x3b6fe0);
+  sphere(group, 0.14, color, 0, 0.36, 0);
+  sphere(group, 0.08, color, 0.16, 0.42, 0);
+  box(group, 0.08, 0.03, 0.42, color, 0, 0.4, 0);
+  const beak = cone(group, 0.04, 0.12, 0xefb423, 0.28, 0.42, 0);
+  beak.rotation.z = -Math.PI / 2;
+}
+
+function bike(group: THREE.Group, text: string) {
+  const frame = tint(text, 0x2c2c2c);
+  wheel(group, -0.28, 0.16, 0);
+  wheel(group, 0.28, 0.16, 0);
+  box(group, 0.52, 0.04, 0.04, frame, 0, 0.28, 0);
+  box(group, 0.04, 0.26, 0.04, frame, -0.14, 0.4, 0);
+  box(group, 0.16, 0.04, 0.08, 0x8d5a32, -0.1, 0.36, 0);
+}
+
+function tent(group: THREE.Group, text: string) {
+  cone(group, 0.42, 0.58, tint(text, 0xe7d7b1), 0, 0.32, 0);
+  box(group, 0.1, 0.22, 0.02, 0x5c3a22, 0, 0.14, 0.16);
+}
+
+function fish(group: THREE.Group, text: string) {
+  const body = sphere(group, 0.18, tint(text, 0x3aa0c8), 0, 0.24, 0);
+  body.scale.set(1.7, 0.7, 0.75);
+  box(group, 0.16, 0.16, 0.04, 0xd7e4ef, -0.32, 0.24, 0);
+}
+
+function robot(group: THREE.Group, text: string) {
+  const metal = tint(text, 0xc5ced6);
+  box(group, 0.28, 0.32, 0.2, metal, 0, 0.4, 0);
+  box(group, 0.22, 0.18, 0.18, 0x66717c, 0, 0.68, 0);
+  box(group, 0.06, 0.22, 0.06, metal, -0.08, 0.12, 0);
+  box(group, 0.06, 0.22, 0.06, metal, 0.08, 0.12, 0);
+  cylinder(group, 0.02, 0.16, 0xefb423, 0, 0.86, 0);
+}
+
+function barrel(group: THREE.Group, text: string) {
+  cylinder(group, 0.2, 0.36, tint(text, 0x8d5a32), 0, 0.2, 0);
+  cylinder(group, 0.22, 0.06, 0x5c3a22, 0, 0.32, 0);
+  cylinder(group, 0.22, 0.06, 0x5c3a22, 0, 0.1, 0);
+}
+
+function chest(group: THREE.Group, text: string) {
+  box(group, 0.46, 0.22, 0.3, tint(text, 0x8d5a32), 0, 0.14, 0);
+  box(group, 0.48, 0.06, 0.32, 0xc48945, 0, 0.26, 0);
+  box(group, 0.08, 0.08, 0.04, 0xefb423, 0, 0.16, 0.16);
+}
+
+function statue(group: THREE.Group, text: string) {
+  const stone = tint(text, 0xc5ced6);
+  cylinder(group, 0.18, 0.08, 0x8d643c, 0, 0.04, 0);
+  person(group, stone, 0.85);
+}
+
+function balloon(group: THREE.Group, text: string) {
+  sphere(group, 0.26, tint(text, 0xe85d75), 0, 0.7, 0);
+  cylinder(group, 0.012, 0.4, 0x5c3a22, 0, 0.32, 0);
+}
+
+function bench(group: THREE.Group, text: string) {
+  const wood = tint(text, 0xc48945);
+  box(group, 0.7, 0.06, 0.28, wood, 0, 0.28, 0);
+  box(group, 0.7, 0.2, 0.06, wood, 0, 0.38, -0.12);
+  box(group, 0.06, 0.22, 0.06, 0x5c3a22, -0.28, 0.12, 0.08);
+  box(group, 0.06, 0.22, 0.06, 0x5c3a22, 0.28, 0.12, 0.08);
+}
+
+function lamp(group: THREE.Group, text: string) {
+  cylinder(group, 0.04, 0.55, 0x5c3a22, 0, 0.28, 0);
+  sphere(group, 0.1, tint(text, 0xf4f1c8), 0, 0.62, 0);
+}
+
+function drawVaried(group: THREE.Group, text: string) {
+  const color = tint(text, hashColor(text));
+  const pick = hash(text.length, text.charCodeAt(0) || 1) % 3;
+  if (pick === 0) {
+    sphere(group, 0.26, color, 0, 0.3, 0);
+    sphere(group, 0.1, 0xf6e6c8, 0.12, 0.48, 0.08);
+    return;
+  }
+  if (pick === 1) {
+    cone(group, 0.28, 0.55, color, 0, 0.3, 0);
+    sphere(group, 0.08, 0xefb423, 0, 0.64, 0);
+    return;
+  }
+  cylinder(group, 0.2, 0.4, color, 0, 0.24, 0);
+  sphere(group, 0.12, 0xf6e6c8, 0, 0.52, 0);
+}
+
+function tint(text: string, fallback: number) {
+  const paints: Array<[RegExp, number]> = [
+    [/\bred\b/i, 0xc23b3b],
+    [/\bblue\b/i, 0x3b6fe0],
+    [/\bgreen\b/i, 0x2f8f3a],
+    [/\byellow\b/i, 0xefb423],
+    [/\borange\b/i, 0xe07a3b],
+    [/\bpurple\b/i, 0x6b4c9a],
+    [/\bblack\b/i, 0x2c2c2c],
+    [/\bwhite\b/i, 0xf4f8fc],
+    [/\bgold(?:en)?\b/i, 0xd4a017],
+    [/\bsilver\b/i, 0xc5ced6],
+    [/\bpink\b/i, 0xe85d75],
+  ];
+  for (const [pattern, color] of paints) if (pattern.test(text)) return color;
+  return fallback;
+}
+
+function hashColor(text: string) {
+  const palette = [0xc23b3b, 0x3b6fe0, 0x2f8f3a, 0xefb423, 0x8c3428, 0x6b4c9a, 0xe07a3b];
+  return palette[hash(text.length, text.charCodeAt(0) || 1) % palette.length] ?? 0xc23b3b;
 }
 
 function house(group: THREE.Group, sx: number, sz: number, wall: number, roof: number) {

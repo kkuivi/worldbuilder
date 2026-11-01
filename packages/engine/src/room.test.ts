@@ -146,7 +146,7 @@ describe("world room", () => {
       { id: "r1", playerId: "a", playerName: "Elikem 2", text: "Put a dragon in the square" },
     ]);
     expect(unmatched.batch.reply).not.toMatch(/breaking the map|smaller change/i);
-    expect(unmatched.batch.ops.some((op) => op.op === "place")).toBe(true);
+    expect(unmatched.batch.ops.some((op) => op.op === "place" && op.label === "Dragon")).toBe(true);
 
     const castle = planBatch(world, [
       { id: "r2", playerId: "a", playerName: "Elikem 2", text: "Build a castle" },
@@ -156,5 +156,11 @@ describe("world room", () => {
     expect(applied.rejected).toEqual([]);
     expect(room.view().entities.some((entity) => entity.sprite === "castle")).toBe(true);
     expect(room.view().chat.at(-1)?.text).toBe(castle.batch.reply);
+
+    const garage = planBatch(world, [
+      { id: "r3", playerId: "a", playerName: "Elikem 2", text: "Add a red car" },
+    ]);
+    expect(garage.batch.ops.some((op) => op.op === "place" && op.label === "Car")).toBe(true);
+    expect(garage.batch.reply).not.toMatch(/breaking the map|smaller change/i);
   });
 });

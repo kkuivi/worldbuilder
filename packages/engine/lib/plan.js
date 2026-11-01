@@ -28,6 +28,31 @@ const TAGS = [
     [/desert|dune/, "desert"],
     [/remove|delete|clear away|get rid/, "remove"],
 ];
+const PROPS = [
+    [/\b(cars?|trucks?|bus|buses|vans?|taxi|jeeps?|automobiles?|wagons?)\b/i, "Car"],
+    [/\b(planes?|airplanes?|jets?|helicopters?|rockets?|spaceships?)\b/i, "Plane"],
+    [/\b(dragons?|dinosaurs?|monsters?)\b/i, "Dragon"],
+    [/\b(horses?|ponies|pony)\b/i, "Horse"],
+    [/\b(birds?|eagles?|chickens?|ducks?)\b/i, "Bird"],
+    [/\b(bikes?|bicycles?|motorcycles?|scooters?)\b/i, "Bike"],
+    [/\btents?\b/i, "Tent"],
+    [/\b(fish|fishes|sharks?|whales?)\b/i, "Fish"],
+    [/\b(robots?|androids?)\b/i, "Robot"],
+    [/\b(barrels?|kegs?)\b/i, "Barrel"],
+    [/\b(chests?|treasures?)\b/i, "Chest"],
+    [/\b(statues?|monuments?)\b/i, "Statue"],
+    [/\bballoons?\b/i, "Balloon"],
+    [/\bbenches\b|\bbench\b/i, "Bench"],
+    [/\b(lanterns?|lamps?)\b/i, "Lamp"],
+];
+function mentionedProps(requests) {
+    const found = [];
+    const text = requests.map((request) => request.text).join(" ");
+    for (const [pattern, label] of PROPS)
+        if (pattern.test(text) && !found.includes(label))
+            found.push(label);
+    return found;
+}
 function tagsFor(text) {
     const found = new Set();
     const lower = text.toLowerCase();
@@ -333,6 +358,9 @@ export function planBatch(world, requests) {
                 storyOps.push({ op: "remove", id: entity.id });
             }
         }
+    }
+    for (const label of mentionedProps(requests)) {
+        addPlace(applyOps(afterBuilds(), storyOps).world, storyOps, "sign", label, undefined, (terrain) => LAND.has(terrain));
     }
     if (terrainOps.length + buildOps.length + storyOps.length === 0) {
         for (const request of requests) {
