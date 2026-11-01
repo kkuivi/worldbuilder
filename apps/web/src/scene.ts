@@ -366,17 +366,32 @@ export function createScene(
     return { x, y, w: Math.abs(x1 - x0) + 1, h: Math.abs(y1 - y0) + 1 };
   }
 
+  function holdPointer(pointerId: number) {
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      // A click still selects when the pointer cannot be captured.
+    }
+  }
+
+  function grabTile(entity: Entity, clientX: number, clientY: number) {
+    const tile = tileAt(clientX, clientY);
+    if (tile) return tile;
+    return { x: entity.x, y: entity.y };
+  }
+
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
     pointerDown = { x: event.clientX, y: event.clientY };
     const id = pickId(event.clientX, event.clientY);
     const entity = id ? world?.entities.find((item) => item.id === id) : undefined;
-    const tile = entity ? tileAt(event.clientX, event.clientY) : null;
-    if (id && entity && tile) {
+    if (id && entity) {
+      const tile = grabTile(entity, event.clientX, event.clientY);
       drag = { id, originX: entity.x, originY: entity.y, grabX: tile.x, grabY: tile.y, x: entity.x, y: entity.y, moved: false };
       controls.enabled = false;
       onSelect(id);
       onTile(null);
+      holdPointer(event.pointerId);
       event.stopPropagation();
       return;
     }
@@ -384,10 +399,12 @@ export function createScene(
     if (!ground) return;
     regionDrag = { x: ground.x, y: ground.y, ax: ground.x, ay: ground.y };
     controls.enabled = false;
+    holdPointer(event.pointerId);
     event.stopPropagation();
   };
   const onPointerMove = (event: PointerEvent) => {
     if (!drag || !pointerDown) return;
+    if (Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) < 8) return;
     const tile = tileAt(event.clientX, event.clientY);
     const entity = world?.entities.find((item) => item.id === drag?.id);
     if (!tile || !entity || !drag) return;
@@ -408,25 +425,30 @@ export function createScene(
   const onPointerUp = (event: PointerEvent) => {
     const drop = drag;
     const region = regionDrag;
+    const start = pointerDown;
     drag = null;
     regionDrag = null;
+    pointerDown = null;
     controls.enabled = true;
+    try {
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    } catch {
+      // Releasing a pointer the browser never captured is safe to skip.
+    }
     if (region) {
-      pointerDown = null;
       onSelect(null);
       onTile(selectionBox(region.x, region.y, region.ax, region.ay));
       return;
     }
-    if (!pointerDown) return;
-    const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y);
-    pointerDown = null;
-    if (drop?.moved) {
+    const travel = start ? Math.hypot(event.clientX - start.x, event.clientY - start.y) : 0;
+    if (drop?.moved && travel >= 8) {
       void Promise.resolve(onMove(drop.id, drop.x, drop.y)).then((ok) => {
         if (!ok) placePreview(drop.id, drop.originX, drop.originY, false);
       });
       return;
     }
-    if (drop || moved > 6) return;
+    if (drop) return;
+    if (!start || travel > 6) return;
     const id = pickId(event.clientX, event.clientY);
     if (id) {
       onSelect(id);

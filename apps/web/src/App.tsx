@@ -368,7 +368,7 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
                   if (entity) setTile(null);
                 }}
                 onTile={(next) => {
-                  setSelectedId(null);
+                  if (next) setSelectedId(null);
                   setTile((current) => {
                     if (!next) return null;
                     const same = current && current.x === next.x && current.y === next.y && current.w === next.w && current.h === next.h;
