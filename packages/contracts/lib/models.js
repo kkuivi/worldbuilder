@@ -105,7 +105,13 @@ const ANIMALS = [
     [/\b(frogs?|toads?)\b/i, "Frog", "frog"],
     [/\b(turtles?|tortoises?)\b/i, "Turtle", "turtle"],
     [/\b(dragons?|dinosaurs?)\b/i, "Dragon", "dragon"],
-    [/\b(birds?|eagles?|ducks?|chickens?|owls?|parrots?|penguins?)\b/i, "Bird", "bird"],
+    [/\b(eagles?)\b/i, "Eagle", "bird"],
+    [/\b(parrots?)\b/i, "Parrot", "bird"],
+    [/\b(owls?)\b/i, "Owl", "bird"],
+    [/\b(ducks?)\b/i, "Duck", "bird"],
+    [/\b(chickens?)\b/i, "Chicken", "bird"],
+    [/\b(penguins?)\b/i, "Penguin", "bird"],
+    [/\b(birds?)\b/i, "Bird", "bird"],
     [/\b(sharks?|whales?|dolphins?|fish|fishes)\b/i, "Fish", "fish"],
     [/\b(bears?)\b/i, "Bear", "beast"],
     [/\b(deer|moose|elk)\b/i, "Deer", "beast"],
@@ -118,6 +124,13 @@ export function animalNames(text) {
         if (pattern.test(text) && !found.includes(label))
             found.push(label);
     return found;
+}
+export function airborne(label) {
+    if (/\bfly(?:ing)?\b/i.test(label))
+        return true;
+    if (/\b(chickens?|ducks?|penguins?|owls?)\b/i.test(label))
+        return false;
+    return /\b(birds?|eagles?|parrots?)\b/i.test(label);
 }
 function animalBody(label) {
     for (const [pattern, , body] of ANIMALS)
@@ -232,14 +245,18 @@ function creature(label) {
     }
     if (body === "bird") {
         const hide = hex(tint ?? 0x3b6fe0);
-        return [
-            `sphere 0.16 0 0 ${hide} 0 0.4 0`,
-            `sphere 0.09 0 0 ${hide} 0.18 0.5 0`,
-            "cone 0.04 0.12 0 efb423 0.28 0.52 0",
-            `box 0.08 0.03 0.4 ${hide} -0.02 0.46 0`,
-            `cylinder 0.02 0.16 0 efb423 0.04 0.16 -0.04`,
-            `cylinder 0.02 0.16 0 efb423 0.04 0.16 0.04`,
-        ].join("\n");
+        const flying = airborne(label);
+        const y = flying ? 0.2 : 0;
+        const lines = [
+            `sphere 0.16 0 0 ${hide} 0 ${0.4 + y} 0`,
+            `sphere 0.09 0 0 ${hide} 0.18 ${0.5 + y} 0`,
+            `cone 0.04 0.12 0 efb423 0.28 ${0.52 + y} 0`,
+            `box 0.36 0.03 0.14 ${hide} -0.02 ${0.48 + y} 0.14`,
+            `box 0.36 0.03 0.14 ${hide} -0.02 ${0.48 + y} -0.14`,
+        ];
+        if (!flying)
+            lines.push("cylinder 0.02 0.16 0 efb423 0.04 0.16 -0.04", "cylinder 0.02 0.16 0 efb423 0.04 0.16 0.04");
+        return lines.join("\n");
     }
     if (body === "fish") {
         const hide = hex(tint ?? 0x3aa0c8);

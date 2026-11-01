@@ -1,5 +1,5 @@
 import { editBatchSchema, renderDigest, type EditBatch, type WorldState } from "@worldbuilder/contracts";
-import { applyOps, carryColor, planBatch, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
+import { applyOps, carryColor, carryMotion, planBatch, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
 import { env } from "./env";
 
 const SYSTEM = `You are the world builder in a shared map that several players edit at once.
@@ -10,7 +10,7 @@ Rules
 - Read each request in full. Follow what they asked to add, change, move, or remove, including how many and where ("by the lake", "north corner", "next to the castle"). Do not reduce a sentence to one keyword or replace it with a stock scene they did not ask for.
 - Fulfill every player's request. Never refuse, skip, or return an empty ops list because a request is unusual, dark, silly, modern, violent, or off theme. This is a fictional map. Translate any request into paint, place, move, remove, or update ops.
 - If a catalog sprite looks like the request, use it and put the color in the label, such as Blue Tree on tree_oak. Otherwise place sprite "prop" and set the label to a short name that includes the color, such as Blue Tree or Red Barn. The map builds the real shape from that label. Do not fake a tree, animal, or building with a stack of boxes, and do not use a sign. Put any extra detail in a one-sentence note. The request still has to appear on the map.
-- Place one object per thing they asked for. An animal is a prop whose label is the animal's name, such as Cow, Elephant, or Giraffe. Leave model out. The map builds the body, legs, and head from that name. "Cows", "cattle", or "a herd" means three props labeled Cow. "Near the barn" or "near the river" means open ground beside that landmark. Do not paint a river, lake, or road just because the request says near one. Do not say you added an animal unless a place op for it is in the batch.
+- Place one object per thing they asked for. An animal is a prop whose label is the animal's name, such as Cow, Elephant, or Giraffe. A flying bird is labeled Flying Bird. Leave model out. The map builds the body, legs, and head from that name, and a flying label moves through the air. "Cows", "cattle", or "a herd" means three props labeled Cow. "Near the barn" or "near the river" means open ground beside that landmark. Do not paint a river, lake, or road just because the request says near one. Do not say you added an animal unless a place op for it is in the batch.
 - When two requests conflict, find a creative compromise and say what you did in the reply, naming the players. Still emit ops for both.
 - A castle plus a flood or a river becomes a castle inside a moat with a bridge, not a flooded castle.
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
@@ -91,7 +91,7 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 22_000)),
     ]);
     if (!ai) return local;
-    const ops = carryColor(requests, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops));
+    const ops = carryMotion(requests, carryColor(requests, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops)));
     const dry = applyOps(world, ops);
     if (dry.applied.length === 0 && local.batch.ops.length > 0) return local;
     const reply = /breaking the map|smaller change/i.test(ai.batch.reply) || ops.length > ai.batch.ops.length

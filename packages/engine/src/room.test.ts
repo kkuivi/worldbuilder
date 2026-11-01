@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TERRAIN_HEIGHT, editBatchSchema, inventModel, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
+import { TERRAIN_HEIGHT, airborne, editBatchSchema, inventModel, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
 import { nudgeRejectedPlaces } from "./apply.js";
 import { carryColor, planBatch, supplementProps } from "./plan.js";
 import { WorldRoom } from "./room.js";
@@ -305,6 +305,18 @@ describe("world room", () => {
     }
     const carried = carryColor([request], [{ op: "place", kind: "tree", x: 1, y: 1, sprite: "tree_oak", label: "Oak" }]);
     expect(carried[0]).toMatchObject({ label: "Blue Oak" });
+  });
+
+  test("names a flying bird and keeps a chicken on the ground", () => {
+    const room = new WorldRoom("FLY");
+    const world = room.start("meadow");
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "elii", text: "add a flying bird" }]);
+    const bird = plan.batch.ops.find((op) => op.op === "place" && /bird/i.test(op.label));
+    expect(bird && bird.op === "place" && airborne(bird.label)).toBe(true);
+    const perched = planBatch(world, [{ id: "r2", playerId: "a", playerName: "elii", text: "add a chicken" }]);
+    const chicken = perched.batch.ops.find((op) => op.op === "place" && /chicken/i.test(op.label));
+    expect(chicken && chicken.op === "place" && chicken.label).toBe("Chicken");
+    expect(chicken && chicken.op === "place" && airborne(chicken.label)).toBe(false);
   });
 
   test("builds an animal with legs instead of a crate", () => {

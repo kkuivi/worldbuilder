@@ -4,6 +4,7 @@ import {
   GRID_H,
   GRID_W,
   TERRAIN_HEIGHT,
+  airborne,
   inventModel,
   modelFor,
   namedColor,
@@ -199,6 +200,15 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
     for (const entity of world.entities) {
       const group = buildEntity(entity);
       group.position.set(entity.x + entity.w / 2, standHeight(entity), entity.y + entity.h / 2);
+      if (airborne(`${entity.label} ${entity.note ?? ""}`)) {
+        group.userData.fly = true;
+        group.userData.homeX = group.position.x;
+        group.userData.homeY = group.position.y;
+        group.userData.homeZ = group.position.z;
+        let phase = 0;
+        for (const char of entity.id) phase += char.charCodeAt(0);
+        group.userData.phase = phase;
+      }
       props.add(group);
     }
   }
@@ -265,10 +275,25 @@ export function createScene(canvas: HTMLCanvasElement, onSelect: (id: string | n
       const age = reduceMotion ? 1 : Math.min(1, Math.max(0, (now - born) / 240));
       const scale = 0.15 + 0.85 * (1 - (1 - age) * (1 - age));
       child.scale.setScalar(scale);
+      if (child.userData.fly) {
+        const phase = Number(child.userData.phase ?? 0);
+        if (reduceMotion) {
+          child.position.y = Number(child.userData.homeY) + 1.7;
+        } else {
+          const angle = time * 0.85 + phase;
+          child.position.x = Number(child.userData.homeX) + Math.cos(angle) * 1.25;
+          child.position.z = Number(child.userData.homeZ) + Math.sin(angle) * 1.25;
+          child.position.y = Number(child.userData.homeY) + 1.65 + Math.sin(time * 2.2 + phase) * 0.2;
+          child.rotation.y = angle;
+        }
+      }
       child.traverse((node) => {
         if (node instanceof THREE.Mesh && node.userData.flame) {
           const flicker = 0.82 + Math.sin(time * 9 + node.id) * 0.18;
           node.scale.set(1, flicker, 1);
+        }
+        if (!reduceMotion && child.userData.fly && node instanceof THREE.Mesh && node.userData.wing) {
+          node.rotation.x = Math.sin(time * 12) * 0.7 * Number(node.userData.wing);
         }
       });
     }
@@ -540,8 +565,10 @@ function modelSpec(entity: Entity): ModelPart[] | null {
 
 function drawModel(group: THREE.Group, parts: ModelPart[]) {
   for (const part of parts) {
-    if (part.shape === "box") box(group, part.a, part.b, part.c, part.color, part.x, part.y, part.z);
-    else if (part.shape === "sphere") sphere(group, part.a, part.color, part.x, part.y, part.z);
+    if (part.shape === "box") {
+      const mesh = box(group, part.a, part.b, part.c, part.color, part.x, part.y, part.z);
+      if (part.b <= 0.05 && part.a >= 0.25) mesh.userData.wing = part.z >= 0 ? 1 : -1;
+    } else if (part.shape === "sphere") sphere(group, part.a, part.color, part.x, part.y, part.z);
     else if (part.shape === "cone") cone(group, part.a, part.b, part.color, part.x, part.y, part.z);
     else cylinder(group, part.a, part.b, part.color, part.x, part.y, part.z);
   }

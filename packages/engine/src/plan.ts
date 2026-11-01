@@ -94,6 +94,29 @@ function sameKind(noun: string, label: string, sprite: SpriteId): boolean {
   return stem.length > 2 && `${label} ${sprite}`.toLowerCase().includes(stem);
 }
 
+function motionedNouns(text: string): Array<{ motion: string; noun: string }> {
+  const found: Array<{ motion: string; noun: string }> = [];
+  const pattern = /\b(flying|swimming)\s+(?:little\s+|small\s+|large\s+|big\s+)?([a-z]{3,})/gi;
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[1]?.toLowerCase() ?? "";
+    const noun = match[2]?.toLowerCase();
+    if (!noun) continue;
+    found.push({ motion: raw.charAt(0).toUpperCase() + raw.slice(1), noun });
+  }
+  return found;
+}
+
+export function carryMotion(requests: PlanRequest[], ops: EditOp[]): EditOp[] {
+  const moves = requests.flatMap((request) => motionedNouns(request.text));
+  if (!moves.length) return ops;
+  return ops.map((op) => {
+    if (op.op !== "place" || /\b(flying|swimming)\b/i.test(op.label)) return op;
+    const hit = moves.find((move) => sameKind(move.noun, op.label, op.sprite));
+    if (!hit) return op;
+    return { ...op, label: `${hit.motion} ${op.label}`.slice(0, 40) };
+  });
+}
+
 export function carryColor(requests: PlanRequest[], ops: EditOp[]): EditOp[] {
   const paints = requests.flatMap((request) => coloredNouns(request.text));
   if (!paints.length) return ops;
@@ -572,7 +595,7 @@ export function planBatch(world: WorldState, requests: PlanRequest[]): { batch: 
 
   const sky = skyAsk(requests);
   const skyOps: EditOp[] = sky ? [{ op: "sky", value: sky }] : [];
-  const ops = carryColor(requests, [...skyOps, ...terrainOps, ...buildOps, ...storyOps]).slice(0, 48);
+  const ops = carryMotion(requests, carryColor(requests, [...skyOps, ...terrainOps, ...buildOps, ...storyOps])).slice(0, 48);
   const reply = replyFor({
     wantMoat,
     wantShore,

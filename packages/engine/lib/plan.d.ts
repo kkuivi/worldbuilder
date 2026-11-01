@@ -10,6 +10,7 @@ export interface StatusLine {
     text: string;
 }
 export declare function skyAsk(requests: PlanRequest[]): "day" | "night" | null;
+export declare function carryMotion(requests: PlanRequest[], ops: EditOp[]): EditOp[];
 export declare function carryColor(requests: PlanRequest[], ops: EditOp[]): EditOp[];
 export declare function supplementSky(requests: PlanRequest[], chosen: EditOp[], _local: EditOp[]): EditOp[];
 export declare function supplementProps(requests: PlanRequest[], chosen: EditOp[], local: EditOp[]): EditOp[];

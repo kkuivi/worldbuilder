@@ -17,6 +17,7 @@ export declare function coloredNouns(text: string): Array<{
     noun: string;
 }>;
 export declare function animalNames(text: string): string[];
+export declare function airborne(label: string): boolean;
 export declare function portrayal(label: string): Portrayal;
 export declare function inventModel(label: string): string;
 export declare function modelFor(label: string, supplied?: string): string;

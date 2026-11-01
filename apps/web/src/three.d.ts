@@ -35,6 +35,12 @@ declare module "three" {
     baseY?: number;
     until?: number;
     flame?: boolean;
+    fly?: boolean;
+    homeX?: number;
+    homeY?: number;
+    homeZ?: number;
+    phase?: number;
+    wing?: number;
   }
 
   export class Object3D {
