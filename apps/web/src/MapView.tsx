@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { GRID_H, GRID_W, type Entity, type WorldState } from "@worldbuilder/contracts";
+import { MAP_MAX_H, MAP_MAX_W, mapSize, type Entity, type WorldState } from "@worldbuilder/contracts";
 import { createScene, type ScenePulse } from "./scene";
 
 export function MapView({
@@ -11,6 +11,7 @@ export function MapView({
   onSelect,
   onTile,
   onMove,
+  onExpand,
 }: {
   world: WorldState;
   accent: string;
@@ -20,6 +21,7 @@ export function MapView({
   onSelect: (entity: Entity | null) => void;
   onTile: (tile: { x: number; y: number; w: number; h: number } | null) => void;
   onMove: (id: string, x: number, y: number) => Promise<boolean> | boolean;
+  onExpand: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef(world);
@@ -46,8 +48,12 @@ export function MapView({
     const prior = previous.current;
     if (prior.version !== world.version) {
       const tiles: Array<{ x: number; y: number }> = [];
-      for (let y = 0; y < GRID_H; y += 1) {
-        for (let x = 0; x < GRID_W; x += 1) {
+      const priorSize = mapSize(prior);
+      const nextSize = mapSize(world);
+      const height = Math.max(priorSize.h, nextSize.h);
+      const width = Math.max(priorSize.w, nextSize.w);
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
           if (prior.terrain[y]?.[x] !== world.terrain[y]?.[x]) tiles.push({ x, y });
         }
       }
@@ -100,6 +106,16 @@ export function MapView({
         role="application"
         aria-label={`${world.name}. Click a tile or drag across the ground to choose where to build. Drag an object to move it. Right-drag to look around.`}
       />
+      {!insideId ? (
+        <button
+          className="expand-map"
+          type="button"
+          disabled={mapSize(world).w >= MAP_MAX_W && mapSize(world).h >= MAP_MAX_H}
+          onClick={onExpand}
+        >
+          Expand map
+        </button>
+      ) : null}
       <p className="map-hint">
         {tile && tile.w * tile.h > 1
           ? "This area is selected. Ask the chat to build inside it."

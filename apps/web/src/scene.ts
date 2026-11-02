@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   GRID_H,
   GRID_W,
+  mapSize,
   ROOM_H,
   ROOM_W,
   TERRAIN_HEIGHT,
@@ -65,7 +66,7 @@ export function createScene(
   renderer.setClearColor(0xb7d4ec);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 280);
   camera.position.set(GRID_W * 0.72, 9, GRID_H + 7);
 
   const controls = new OrbitControls(camera, canvas);
@@ -74,7 +75,7 @@ export function createScene(
   controls.screenSpacePanning = false;
   controls.maxPolarAngle = Math.PI / 2.08;
   controls.minDistance = 8;
-  controls.maxDistance = 72;
+  controls.maxDistance = 140;
   controls.mouseButtons.RIGHT = 0;
   controls.update();
 
@@ -149,12 +150,23 @@ export function createScene(
   let viewW = 0;
   let viewH = 0;
   let pointerDown: { x: number; y: number } | null = null;
+  let framedSize = "";
+
+  function placeStars(width: number, height: number) {
+    stars.children.forEach((star, index) => {
+      const angle = (index / 40) * Math.PI * 2;
+      const radius = 7 + (index % 6) * 1.6 + Math.max(width, height) * 0.12;
+      star.position.set(width / 2 + Math.cos(angle) * radius, 7 + (index % 4) * 0.7, height / 2 + Math.sin(angle) * radius * 0.55);
+    });
+  }
 
   function frameWorld() {
-    controls.target.set(GRID_W / 2, 0.35, GRID_H * 0.42);
+    const size = world ? mapSize(world) : { w: GRID_W, h: GRID_H };
+    controls.target.set(size.w / 2, 0.35, size.h * 0.42);
     const aspect = Math.max(camera.aspect || 1, 0.55);
     const halfFov = ((camera.fov * Math.PI) / 180) / 2;
-    const distance = Math.max(16, 20 / (Math.tan(halfFov) * aspect));
+    const scale = Math.max(size.w / GRID_W, size.h / GRID_H, 1);
+    const distance = Math.max(16, 20 / (Math.tan(halfFov) * aspect)) * scale;
     const direction = new THREE.Vector3(0.22, 0.58, 1);
     const length = Math.hypot(direction.x, direction.y, direction.z);
     camera.position.set(
@@ -162,6 +174,10 @@ export function createScene(
       controls.target.y + (direction.y / length) * distance,
       controls.target.z + (direction.z / length) * distance,
     );
+    controls.maxDistance = 72 * scale;
+    camera.far = 200 * scale;
+    camera.updateProjectionMatrix();
+    placeStars(size.w, size.h);
     controls.update();
   }
 
@@ -191,7 +207,23 @@ export function createScene(
 
   function surface(x: number, y: number) {
     const cell = world?.terrain[y]?.[x];
-    return cell ? TERRAIN_HEIGHT[cell] : TERRAIN_HEIGHT.grass;
+    return cell ? cellHeight(cell, x, y) : TERRAIN_HEIGHT.grass;
+  }
+
+  function cellHeight(kind: Terrain, x: number, y: number) {
+    const base = TERRAIN_HEIGHT[kind];
+    if (kind !== "sand" || !world) return base;
+    const around: Array<[number, number]> = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    if (around.some(([dx, dy]) => world?.terrain[y + dy]?.[x + dx] === "water")) return base;
+    const sandSides = around.filter(([dx, dy]) => world?.terrain[y + dy]?.[x + dx] === "sand").length;
+    if (sandSides < 2) return base;
+    const wave = Math.sin(x * 1.15) * 0.55 + Math.cos(y * 0.95) * 0.45;
+    return base + 0.18 + ((wave + 1) / 2) * 0.62;
   }
 
   function standHeight(entity: Entity) {
@@ -277,10 +309,11 @@ export function createScene(
       drawInterior(insideNow);
       return;
     }
-    for (let y = 0; y < GRID_H; y += 1) {
-      for (let x = 0; x < GRID_W; x += 1) {
+    const span = mapSize(world);
+    for (let y = 0; y < span.h; y += 1) {
+      for (let x = 0; x < span.w; x += 1) {
         const kind = world.terrain[y]?.[x] ?? "grass";
-        const height = TERRAIN_HEIGHT[kind];
+        const height = cellHeight(kind, x, y);
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.96, height, 0.96), lambert(tileColor(kind, x, y)));
         mesh.position.set(x + 0.5, height / 2, y + 0.5);
         mesh.userData.water = kind === "water";
@@ -302,7 +335,8 @@ export function createScene(
     const seen = new Set<string>();
     for (const tile of pulse.tiles) {
       const key = `${tile.x},${tile.y}`;
-      if (seen.has(key) || tile.x < 0 || tile.y < 0 || tile.x >= GRID_W || tile.y >= GRID_H) continue;
+      const span = world ? mapSize(world) : { w: GRID_W, h: GRID_H };
+      if (seen.has(key) || tile.x < 0 || tile.y < 0 || tile.x >= span.w || tile.y >= span.h) continue;
       seen.add(key);
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(0.98, 0.07, 0.98),
@@ -343,8 +377,8 @@ export function createScene(
   }
 
   function fits(entity: Entity, x: number, y: number) {
-    const width = insideNow ? ROOM_W : GRID_W;
-    const height = insideNow ? ROOM_H : GRID_H;
+    const width = insideNow ? ROOM_W : world ? mapSize(world).w : GRID_W;
+    const height = insideNow ? ROOM_H : world ? mapSize(world).h : GRID_H;
     return x >= 0 && y >= 0 && x + entity.w <= width && y + entity.h <= height;
   }
 
@@ -574,6 +608,14 @@ export function createScene(
       if (key !== builtKey) {
         rebuild();
         builtKey = key;
+      }
+      const sizeKey = `${mapSize(next).w}x${mapSize(next).h}`;
+      if (sizeKey !== framedSize) {
+        framedSize = sizeKey;
+        if (!insideNow) {
+          userMoved = false;
+          frameWorld();
+        }
       }
       if (entered) {
         userMoved = false;

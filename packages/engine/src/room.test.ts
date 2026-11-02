@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { TERRAIN_HEIGHT, airborne, editBatchSchema, inventModel, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
+import { TERRAIN_HEIGHT, airborne, editBatchSchema, inventModel, mapSize, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
 import { applyOps, nudgeRejectedPlaces } from "./apply.js";
-import { carryColor, planBatch, supplementProps } from "./plan.js";
+import { carryColor, carrySpot, planBatch, supplementLand, supplementProps } from "./plan.js";
 import { WorldRoom } from "./room.js";
 
 function named(room: WorldRoom, requests: Array<{ id: string; playerId: string; text: string }>) {
@@ -540,5 +540,56 @@ describe("world room", () => {
     expect(houses.length).toBeGreaterThan(1);
     expect(houses.every((op) => op.op === "place" && op.x >= block!.x && op.y >= block!.y && op.x + 2 <= block!.x + 6 && op.y + 2 <= block!.y + 4)).toBe(true);
     expect(applyOps(world, homes.batch.ops).rejected).toEqual([]);
+  });
+
+  test("expands the map and keeps the pieces where they stood", () => {
+    const room = new WorldRoom("GROW");
+    const world = room.start("field");
+    const tree = world.entities.find((entity) => !entity.inside);
+    expect(tree).toBeTruthy();
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "Ada", text: "Expand the map" }]);
+    expect(plan.batch.ops).toEqual([{ op: "grow", north: 4, east: 4, south: 4, west: 4 }]);
+    expect(plan.batch.reply).toBe("I expanded the map to 32 by 24.");
+    const applied = applyOps(world, plan.batch.ops);
+    expect(applied.rejected).toEqual([]);
+    expect(mapSize(applied.world)).toEqual({ w: 32, h: 24 });
+    const moved = applied.world.entities.find((entity) => entity.id === tree!.id);
+    expect(moved).toMatchObject({ x: tree!.x + 4, y: tree!.y + 4 });
+    const east = planBatch(applied.world, [{ id: "e", playerId: "a", playerName: "Ada", text: "expand the map east" }]);
+    expect(east.batch.ops).toEqual([{ op: "grow", north: 0, east: 8, south: 0, west: 0 }]);
+    let current = applied.world;
+    for (let step = 0; step < 4; step += 1) {
+      const next = planBatch(current, [{ id: `g${step}`, playerId: "a", playerName: "Ada", text: "make the map bigger" }]);
+      current = applyOps(current, next.batch.ops).world;
+    }
+    expect(mapSize(current)).toEqual({ w: 48, h: 32 });
+    const full = planBatch(current, [{ id: "full", playerId: "a", playerName: "Ada", text: "expand the map" }]);
+    expect(full.batch.ops).toEqual([]);
+    expect(full.batch.reply).toBe("The map is already as large as it can be.");
+  });
+
+  test("sand dunes fill the selected ground instead of a marker", () => {
+    const room = new WorldRoom("DUNE");
+    const world = room.start("Wilds");
+    const spot = { x: 0, y: 0, w: 6, h: 4 };
+    const request = { id: "r", playerId: "a", playerName: "Jonnyy", text: "sand dunes", spot };
+    const plan = planBatch(world, [request]);
+    expect(plan.batch.ops.some((op) => op.op === "place")).toBe(false);
+    expect(plan.batch.ops).toContainEqual({ op: "paint", x: 0, y: 0, w: 6, h: 4, terrain: "sand" });
+    expect(plan.batch.reply).toBe("I raised sand dunes across the area you selected.");
+    const applied = applyOps(world, plan.batch.ops);
+    expect(applied.rejected).toEqual([]);
+    expect(applied.world.terrain[0][0]).toBe("sand");
+    expect(applied.world.terrain[3][5]).toBe("sand");
+    expect(applied.world.terrain[0][6]).not.toBe("sand");
+
+    const marked = carrySpot([request], world, [{ op: "place", kind: "custom", x: 1, y: 1, sprite: "prop", label: "Marker" }]);
+    expect(marked.some((op) => op.op === "place")).toBe(false);
+    expect(supplementLand([request], world, marked).some((op) => op.op === "place")).toBe(false);
+
+    const open = planBatch(world, [{ id: "o", playerId: "a", playerName: "Jonnyy", text: "add sand dunes" }]);
+    expect(open.batch.ops.some((op) => op.op === "place")).toBe(false);
+    expect(open.batch.ops.some((op) => op.op === "paint" && op.terrain === "sand")).toBe(true);
+    expect(open.batch.reply).toBe("I turned the open ground into sand dunes.");
   });
 });

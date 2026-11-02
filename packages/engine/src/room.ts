@@ -9,19 +9,20 @@ import type {
   WorldEvent,
   WorldState,
 } from "@worldbuilder/contracts";
-import { GRID_H, GRID_W, ROOM_H, ROOM_W, canEnter } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, ROOM_H, ROOM_W, canEnter, mapSize } from "@worldbuilder/contracts";
 import { applyOps } from "./apply.js";
 
 function cleanSpot(
   spot: { x: number; y: number; w?: number; h?: number } | undefined,
-  inside?: string,
+  inside: string | undefined,
+  world: { terrain: unknown[][] },
 ): { x: number; y: number; w: number; h: number } | undefined {
   if (!spot || !Number.isInteger(spot.x) || !Number.isInteger(spot.y)) return undefined;
   const w = spot.w == null ? 1 : spot.w;
   const h = spot.h == null ? 1 : spot.h;
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) return undefined;
-  const width = inside ? ROOM_W : GRID_W;
-  const height = inside ? ROOM_H : GRID_H;
+  const width = inside ? ROOM_W : mapSize(world).w;
+  const height = inside ? ROOM_H : mapSize(world).h;
   if (spot.x < 0 || spot.y < 0 || spot.x + w > width || spot.y + h > height) return undefined;
   return { x: spot.x, y: spot.y, w, h };
 }
@@ -280,7 +281,7 @@ export class WorldRoom {
       at: message.at,
       inside,
       focus: focus && world.entities.some((entity) => entity.id === focus) ? focus : undefined,
-      spot: cleanSpot(spot, inside),
+      spot: cleanSpot(spot, inside, world),
       status: "pending",
     });
     this.emit("chat", { message });

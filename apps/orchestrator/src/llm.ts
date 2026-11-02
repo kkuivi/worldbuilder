@@ -1,9 +1,9 @@
 import { editBatchSchema, renderDigest, type EditBatch, type WorldState } from "@worldbuilder/contracts";
-import { applyOps, carryColor, carryFocus, carryInterior, carryMotion, carrySpot, planBatch, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
+import { applyOps, carryColor, carryFocus, carryInterior, carryMotion, carrySpot, landReply, planBatch, supplementGrow, supplementLand, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
 import { env } from "./env";
 
 const SYSTEM = `You are the world builder in a shared map that several players edit at once.
-The grid is 24 wide and 16 tall. Coordinates start at 0 in the top left.
+The digest states the current grid size. A new world starts 24 wide and 16 tall, and it can grow to 48 by 32. Coordinates start at 0 in the top left. When a player asks to expand the map, make it bigger, or add more land, emit a grow op such as { "op": "grow", "north": 4, "east": 4, "south": 4, "west": 4 }. Use north, east, south, or west alone when they name a side.
 You receive the current world and the latest requests from named players.
 Return only JSON with requestIds, baseVersion, ops, and reply.
 Rules
@@ -20,7 +20,8 @@ Rules
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
 - Stay inside the grid and use only sprite ids from the catalog you are given. Placement rules still apply to the finished ops: houses, towers, castles, and trees cannot sit on water; bridges sit on water or sand; roads cannot sit on water; boats need water; entities cannot overlap. Put a road on open ground beside the building, not on tiles that building already covers.
 - Never refuse because a request does not fit, is too big, or would disturb what is already on the map. Do not say it would break the map, and do not ask for a smaller change. If something is in the way, remove it, repaint the ground, and place what they asked for.
-- Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. Painting a tile changes its height. There is no separate height operation.
+- Sand dunes, a desert, or sand is a paint of sand across the selected area, or across the open grass when nothing is selected. Hills are stone. Snow or winter paints snow. Never place a prop, marker, or sign for ground.
+- Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. A field of sand rises and falls into dunes. Painting a tile changes its height. There is no separate height operation.
 - Night and day change the whole sky. Emit { "op": "sky", "value": "night" } or "day". A note on a building does not make it night.
 - Give each thing a sprite from the catalog and a label. Use notes for short lore, one sentence at most.
 Ops are paint, place, move, remove, or update.`;
@@ -87,6 +88,7 @@ async function complete(system: string, prompt: string, schema: { safeParse: (va
 
 export async function composeBatch(world: WorldState, requests: PlanRequest[]): Promise<{ batch: EditBatch; lines: StatusLine[] }> {
   const local = planBatch(world, requests);
+  if (local.batch.ops.length > 0 && local.batch.ops.every((op) => op.op === "grow")) return local;
   if (!env.llmKey) return local;
 
   try {
@@ -95,7 +97,7 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 22_000)),
     ]);
     if (!ai) return local;
-    const ops = carrySpot(requests, world, carryFocus(requests, world, carryMotion(requests, carryColor(requests, carryInterior(requests, world, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops))))));
+    const ops = supplementGrow(requests, world, supplementLand(requests, world, carrySpot(requests, world, carryFocus(requests, world, carryMotion(requests, carryColor(requests, carryInterior(requests, world, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops))))))));
     const dry = applyOps(world, ops);
     if (dry.applied.length === 0 && local.batch.ops.length > 0) return local;
     const base = /breaking the map|smaller change/i.test(ai.batch.reply) || ops.length > ai.batch.ops.length
@@ -104,7 +106,7 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
     const wide = requests.some((request) => (request.spot?.w ?? 1) * (request.spot?.h ?? 1) > 1);
     const note = wide ? "I built it inside the area you selected." : "I built it on the tile you selected.";
     const spotted = requests.some((request) => request.spot) && ops.some((op) => op.op === "place");
-    const reply = spotted && !base.includes(note) ? `${base} ${note}`.trim() : base;
+    const reply = landReply(requests, ops) ?? (spotted && !base.includes(note) ? `${base} ${note}`.trim() : base);
     return {
       batch: { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops, reply },
       lines: ai.lines,

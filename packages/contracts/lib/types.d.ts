@@ -1,8 +1,24 @@
 import type { SpriteId } from "./sprites.js";
 export declare const GRID_W = 24;
 export declare const GRID_H = 16;
+export declare const MAP_MAX_W = 48;
+export declare const MAP_MAX_H = 32;
+export declare const MAP_STEP = 4;
 export declare const ROOM_W = 8;
 export declare const ROOM_H = 6;
+export interface GrowMargins {
+    north: number;
+    east: number;
+    south: number;
+    west: number;
+}
+export declare function mapSize(world: {
+    terrain: unknown[][];
+}): {
+    w: number;
+    h: number;
+};
+export declare function fitGrow(width: number, height: number, asked: GrowMargins): GrowMargins;
 export declare const TERRAINS: readonly ["grass", "water", "sand", "stone", "snow", "dirt"];
 export type Terrain = (typeof TERRAINS)[number];
 export declare const SKIES: readonly ["day", "night"];
@@ -79,6 +95,12 @@ export type EditOp = {
 } | {
     op: "sky";
     value: Sky;
+} | {
+    op: "grow";
+    north: number;
+    east: number;
+    south: number;
+    west: number;
 } | {
     op: "place";
     kind: EntityKind;

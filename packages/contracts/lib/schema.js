@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SPRITE_IDS } from "./sprites.js";
-import { ENTITY_KINDS, SKIES, TERRAINS } from "./types.js";
+import { ENTITY_KINDS, MAP_MAX_H, MAP_MAX_W, SKIES, TERRAINS } from "./types.js";
 const modelField = z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? undefined : value), z.string().trim().min(1).max(700).optional());
 export const terrainSchema = z.enum(TERRAINS);
 export const skySchema = z.enum(SKIES);
@@ -11,13 +11,20 @@ export const editOpSchema = z.discriminatedUnion("op", [
         op: z.literal("paint"),
         x: z.number().int(),
         y: z.number().int(),
-        w: z.number().int().positive().max(24),
-        h: z.number().int().positive().max(16),
+        w: z.number().int().positive().max(MAP_MAX_W),
+        h: z.number().int().positive().max(MAP_MAX_H),
         terrain: terrainSchema,
     }),
     z.object({
         op: z.literal("sky"),
         value: skySchema,
+    }),
+    z.object({
+        op: z.literal("grow"),
+        north: z.number().int().nonnegative().max(16),
+        east: z.number().int().nonnegative().max(16),
+        south: z.number().int().nonnegative().max(16),
+        west: z.number().int().nonnegative().max(16),
     }),
     z.object({
         op: z.literal("place"),

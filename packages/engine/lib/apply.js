@@ -1,4 +1,4 @@
-import { GRID_H, GRID_W, ROOM_H, ROOM_W, SPRITES, canEnter, isSpriteId, inventModel, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
+import { ROOM_H, ROOM_W, SPRITES, canEnter, fitGrow, isSpriteId, inventModel, mapSize, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
 const WATER_FORBIDDEN = new Set(["house", "tower", "castle", "tree"]);
 export function cloneWorld(world) {
     return structuredClone(world);
@@ -24,8 +24,8 @@ function probeEntity(op, x, y) {
     };
 }
 function nearestOpen(world, entity) {
-    const width = entity.inside ? ROOM_W : GRID_W;
-    const height = entity.inside ? ROOM_H : GRID_H;
+    const width = entity.inside ? ROOM_W : mapSize(world).w;
+    const height = entity.inside ? ROOM_H : mapSize(world).h;
     let best = null;
     for (let y = 0; y <= height - entity.h; y += 1) {
         for (let x = 0; x <= width - entity.w; x += 1) {
@@ -80,8 +80,9 @@ export function nudgeRejectedPlaces(world, ops) {
     }
     return fixed;
 }
-function inBounds(x, y, w, h) {
-    return x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= GRID_W && y + h <= GRID_H;
+function inBounds(world, x, y, w, h) {
+    const size = mapSize(world);
+    return x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= size.w && y + h <= size.h;
 }
 function tilesOf(x, y, w, h) {
     const tiles = [];
@@ -102,12 +103,12 @@ export function placementError(world, entity, ignoreId) {
         return `unknown sprite ${entity.sprite}`;
     if (entity.inside)
         return interiorError(world, entity, ignoreId);
-    if (!inBounds(entity.x, entity.y, entity.w, entity.h))
-        return "outside the 24 by 16 grid";
+    if (!inBounds(world, entity.x, entity.y, entity.w, entity.h))
+        return "outside the map";
     const tiles = tilesOf(entity.x, entity.y, entity.w, entity.h);
     const terrains = tiles.map(([x, y]) => terrainAt(world, x, y));
     if (terrains.some((terrain) => terrain == null))
-        return "outside the 24 by 16 grid";
+        return "outside the map";
     if (WATER_FORBIDDEN.has(entity.kind) && terrains.some((terrain) => terrain === "water")) {
         return `${entity.kind} cannot sit on water`;
     }
@@ -137,9 +138,37 @@ function interiorError(world, entity, ignoreId) {
     return null;
 }
 function rejectPaint(world, op) {
-    if (!inBounds(op.x, op.y, op.w, op.h))
-        return "paint is outside the grid";
-    return world.terrain[op.y]?.[op.x] ? null : "paint is outside the grid";
+    if (!inBounds(world, op.x, op.y, op.w, op.h))
+        return "paint is outside the map";
+    return world.terrain[op.y]?.[op.x] ? null : "paint is outside the map";
+}
+function growMap(world, op) {
+    const size = mapSize(world);
+    const margins = fitGrow(size.w, size.h, op);
+    if (margins.north + margins.east + margins.south + margins.west === 0)
+        return "the map is already as large as it can be";
+    const nextH = size.h + margins.north + margins.south;
+    const nextW = size.w + margins.west + margins.east;
+    const terrain = [];
+    for (let y = 0; y < nextH; y += 1) {
+        const sourceY = Math.min(size.h - 1, Math.max(0, y - margins.north));
+        const row = [];
+        for (let x = 0; x < nextW; x += 1) {
+            const sourceX = Math.min(size.w - 1, Math.max(0, x - margins.west));
+            row.push(world.terrain[sourceY]?.[sourceX] ?? "grass");
+        }
+        terrain.push(row);
+    }
+    world.terrain = terrain;
+    if (margins.west || margins.north) {
+        for (const entity of world.entities) {
+            if (entity.inside)
+                continue;
+            entity.x += margins.west;
+            entity.y += margins.north;
+        }
+    }
+    return null;
 }
 let spawnCounter = 0;
 function madeSprite(sprite, label, model) {
@@ -165,6 +194,8 @@ function applyOne(world, op, spawned, index) {
         world.sky = op.value;
         return null;
     }
+    if (op.op === "grow")
+        return growMap(world, op);
     if (op.op === "paint") {
         const error = rejectPaint(world, op);
         if (error)

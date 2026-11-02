@@ -34,6 +34,24 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     value: "day" | "night";
     op: "sky";
 }>, z.ZodObject<{
+    op: z.ZodLiteral<"grow">;
+    north: z.ZodNumber;
+    east: z.ZodNumber;
+    south: z.ZodNumber;
+    west: z.ZodNumber;
+}, "strip", z.ZodTypeAny, {
+    op: "grow";
+    north: number;
+    east: number;
+    south: number;
+    west: number;
+}, {
+    op: "grow";
+    north: number;
+    east: number;
+    south: number;
+    west: number;
+}>, z.ZodObject<{
     op: z.ZodLiteral<"place">;
     kind: z.ZodEnum<["tree", "house", "tower", "castle", "bridge", "road", "rock", "flower", "campfire", "boat", "npc", "sign", "custom"]>;
     x: z.ZodNumber;
@@ -149,6 +167,24 @@ export declare const editBatchSchema: z.ZodObject<{
         value: "day" | "night";
         op: "sky";
     }>, z.ZodObject<{
+        op: z.ZodLiteral<"grow">;
+        north: z.ZodNumber;
+        east: z.ZodNumber;
+        south: z.ZodNumber;
+        west: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
+    }, {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
+    }>, z.ZodObject<{
         op: z.ZodLiteral<"place">;
         kind: z.ZodEnum<["tree", "house", "tower", "castle", "bridge", "road", "rock", "flower", "campfire", "boat", "npc", "sign", "custom"]>;
         x: z.ZodNumber;
@@ -245,6 +281,12 @@ export declare const editBatchSchema: z.ZodObject<{
         value: "day" | "night";
         op: "sky";
     } | {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
+    } | {
         op: "place";
         x: number;
         y: number;
@@ -286,6 +328,12 @@ export declare const editBatchSchema: z.ZodObject<{
     } | {
         value: "day" | "night";
         op: "sky";
+    } | {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
     } | {
         op: "place";
         x: number;
@@ -348,6 +396,24 @@ export declare const agentProposalSchema: z.ZodObject<{
     }, {
         value: "day" | "night";
         op: "sky";
+    }>, z.ZodObject<{
+        op: z.ZodLiteral<"grow">;
+        north: z.ZodNumber;
+        east: z.ZodNumber;
+        south: z.ZodNumber;
+        west: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
+    }, {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"place">;
         kind: z.ZodEnum<["tree", "house", "tower", "castle", "bridge", "road", "rock", "flower", "campfire", "boat", "npc", "sign", "custom"]>;
@@ -444,6 +510,12 @@ export declare const agentProposalSchema: z.ZodObject<{
         value: "day" | "night";
         op: "sky";
     } | {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
+    } | {
         op: "place";
         x: number;
         y: number;
@@ -485,6 +557,12 @@ export declare const agentProposalSchema: z.ZodObject<{
     } | {
         value: "day" | "night";
         op: "sky";
+    } | {
+        op: "grow";
+        north: number;
+        east: number;
+        south: number;
+        west: number;
     } | {
         op: "place";
         x: number;

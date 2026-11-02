@@ -1,4 +1,4 @@
-import { GRID_H, GRID_W, ROOM_H, ROOM_W, SPRITES, canEnter, colorWord, coloredNouns, animalNames, furnitureNames, inventModel, isFurniture, portrayal, } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, MAP_STEP, ROOM_H, ROOM_W, SPRITES, canEnter, colorWord, coloredNouns, animalNames, fitGrow, furnitureNames, inventModel, isFurniture, mapSize, portrayal, } from "@worldbuilder/contracts";
 import { applyOps, placementError } from "./apply.js";
 const TAGS = [
     [/castle|fortress|keep|palace/, "castle"],
@@ -46,6 +46,70 @@ const PROPS = [
     [/\bbenches\b|\bbench\b/i, "Bench"],
     [/\b(lanterns?|lamps?)\b/i, "Lamp"],
 ];
+export function growAsk(text) {
+    const lower = text.toLowerCase();
+    const aboutMap = /\b(map|world|grid|land)\b/.test(lower) && /\b(expand|bigger|larger|enlarge|extend|grow|wider)\b/.test(lower);
+    const moreRoom = /\bmore (land|room|space|ground)\b/.test(lower);
+    const expandEdge = /\bexpand\b/.test(lower) && /\b(north|south|east|west)\b/.test(lower);
+    if (!aboutMap && !moreRoom && !expandEdge)
+        return null;
+    if (!/\b(north|south|east|west)\b/.test(lower))
+        return { north: MAP_STEP, east: MAP_STEP, south: MAP_STEP, west: MAP_STEP };
+    return {
+        north: /\bnorth\b/.test(lower) ? 6 : 0,
+        south: /\bsouth\b/.test(lower) ? 6 : 0,
+        east: /\beast\b/.test(lower) ? 8 : 0,
+        west: /\bwest\b/.test(lower) ? 8 : 0,
+    };
+}
+function onlyGrow(text) {
+    if (!growAsk(text))
+        return false;
+    const rest = text
+        .toLowerCase()
+        .replace(/\b(please|thanks|now|just|can you|could you|add|place|put|give us|give me)\b/g, " ")
+        .replace(/\b(expand|bigger|larger|enlarge|extended|extend|grow|growing|wider|more)\b/g, " ")
+        .replace(/\b(the|a|an|map|world|grid|land|room|space|ground|to|on|north|south|east|west|side|sides|make|made|it|should|be|and)\b/g, " ")
+        .replace(/[^a-z]+/g, " ")
+        .trim();
+    return rest.length === 0;
+}
+function askedGrowth(requests) {
+    const margins = { north: 0, east: 0, south: 0, west: 0 };
+    let found = false;
+    for (const request of requests) {
+        const asked = growAsk(request.text);
+        if (!asked)
+            continue;
+        found = true;
+        margins.north = Math.max(margins.north, asked.north);
+        margins.east = Math.max(margins.east, asked.east);
+        margins.south = Math.max(margins.south, asked.south);
+        margins.west = Math.max(margins.west, asked.west);
+    }
+    return found ? margins : null;
+}
+function growOp(margins) {
+    return { op: "grow", north: margins.north, east: margins.east, south: margins.south, west: margins.west };
+}
+function growReply(width, height, margins) {
+    const nextW = width + margins.west + margins.east;
+    const nextH = height + margins.north + margins.south;
+    if (nextW === width && nextH === height)
+        return "The map is already as large as it can be.";
+    return `I expanded the map to ${nextW} by ${nextH}.`;
+}
+export function supplementGrow(requests, world, chosen) {
+    const asked = askedGrowth(requests);
+    if (!asked)
+        return chosen;
+    const margins = fitGrow(mapSize(world).w, mapSize(world).h, asked);
+    if (margins.north + margins.east + margins.south + margins.west === 0)
+        return chosen;
+    if (chosen.some((op) => op.op === "grow"))
+        return chosen;
+    return [...chosen, growOp(margins)].slice(0, 48);
+}
 export function skyAsk(requests) {
     const text = requests.map((request) => request.text).join(" \n ");
     let sky = null;
@@ -276,15 +340,15 @@ export function carryFocus(requests, world, ops) {
     });
     return [...edits, ...kept].slice(0, 48);
 }
-function spotBox(spot, inside) {
+function spotBox(spot, inside, world) {
     if (!spot || !Number.isInteger(spot.x) || !Number.isInteger(spot.y))
         return null;
     const w = spot.w == null ? 1 : spot.w;
     const h = spot.h == null ? 1 : spot.h;
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1)
         return null;
-    const width = inside ? ROOM_W : GRID_W;
-    const height = inside ? ROOM_H : GRID_H;
+    const width = inside ? ROOM_W : world ? mapSize(world).w : GRID_W;
+    const height = inside ? ROOM_H : world ? mapSize(world).h : GRID_H;
     if (spot.x < 0 || spot.y < 0 || spot.x + w > width || spot.y + h > height)
         return null;
     return { x: spot.x, y: spot.y, w, h };
@@ -326,8 +390,8 @@ function anchorPlace(world, op, request) {
         return [op];
     const footprint = placeFootprint(op);
     const room = request.inside;
-    const width = room ? ROOM_W : GRID_W;
-    const height = room ? ROOM_H : GRID_H;
+    const width = room ? ROOM_W : mapSize(world).w;
+    const height = room ? ROOM_H : mapSize(world).h;
     if (footprint.w > width || footprint.h > height)
         return [op];
     const x = Math.max(0, Math.min(request.spot.x, width - footprint.w));
@@ -424,9 +488,11 @@ function stamp(sprite, label, x, y, inside) {
 }
 function packInArea(world, area, request, prototypes, fill) {
     const loose = area.w === 1 || area.h === 1;
-    const limitW = request.inside ? ROOM_W : GRID_W;
-    const limitH = request.inside ? ROOM_H : GRID_H;
-    const seeds = prototypes.length ? prototypes : [stamp("prop", "Marker", area.x, area.y, request.inside)];
+    const limitW = request.inside ? ROOM_W : mapSize(world).w;
+    const limitH = request.inside ? ROOM_H : mapSize(world).h;
+    const seeds = prototypes.length ? prototypes : landscapeTerrain(request.text) ? [] : [stamp("prop", "Marker", area.x, area.y, request.inside)];
+    if (!seeds.length)
+        return [];
     const copies = fill
         ? Array.from({ length: 12 }, (_, index) => seeds[index % seeds.length]).filter((item) => Boolean(item))
         : seeds;
@@ -462,6 +528,106 @@ function roadsIn(world, area, inside) {
     const roads = cells.map((cell) => stamp("road", "Road", cell.x, cell.y, inside));
     return [...prepareFootprints(world, cells, inside, "dirt"), ...roads];
 }
+function landscapeTerrain(text) {
+    const lower = text.toLowerCase();
+    if (/\b(beach|shore|ocean|sea|river|stream|creek|lake|pond|moat|flood)\b/.test(lower))
+        return null;
+    if (/\b(dunes?|desert|sand)\b/.test(lower))
+        return "sand";
+    if (/\b(snow|winter|frozen|ice)\b/.test(lower))
+        return "snow";
+    if (/\b(dirt|mud)\b/.test(lower))
+        return "dirt";
+    if (/\b(mountain|hill|cliff)\b/.test(lower))
+        return "stone";
+    return null;
+}
+function duneWords(text) {
+    return /\b(dunes?|desert)\b/i.test(text);
+}
+function isPlaceholder(op) {
+    if (op.op !== "place")
+        return false;
+    return /^(marker|(sand )?dunes?|desert|sand)$/i.test(op.label.trim());
+}
+function widenPatch(area, world) {
+    if (area.w >= 4 && area.h >= 3)
+        return area;
+    const span = mapSize(world);
+    const w = Math.min(span.w, Math.max(area.w, 6));
+    const h = Math.min(span.h, Math.max(area.h, 4));
+    const x = Math.max(0, Math.min(area.x - Math.floor((w - area.w) / 2), span.w - w));
+    const y = Math.max(0, Math.min(area.y - Math.floor((h - area.h) / 2), span.h - h));
+    return { x, y, w, h };
+}
+function landscapePaint(request, world) {
+    const terrain = landscapeTerrain(request.text);
+    const area = spotBox(request.spot, request.inside, world);
+    if (!terrain || !area || request.inside)
+        return null;
+    const patch = duneWords(request.text) ? widenPatch(area, world) : area;
+    return { op: "paint", x: patch.x, y: patch.y, w: patch.w, h: patch.h, terrain };
+}
+function applyLandscape(requests, world, ops) {
+    if (requests.length !== 1)
+        return null;
+    const request = requests[0];
+    if (!request?.spot || focusEntity(request, world) || !landscapeTerrain(request.text))
+        return null;
+    const paint = landscapePaint(request, world);
+    if (!paint)
+        return null;
+    const kept = ops.filter((op) => op.op !== "paint" && !isPlaceholder(op));
+    return [...kept, paint];
+}
+export function landReply(requests, ops) {
+    if (requests.length !== 1)
+        return null;
+    const request = requests[0];
+    const terrain = request ? landscapeTerrain(request.text) : null;
+    if (!request || !terrain)
+        return null;
+    if (ops.some((op) => op.op === "place" || op.op === "remove" || op.op === "update" || op.op === "move"))
+        return null;
+    if (!ops.some((op) => op.op === "paint" && op.terrain === terrain))
+        return null;
+    const wide = Boolean(request.spot && ((request.spot.w ?? 1) > 1 || (request.spot.h ?? 1) > 1));
+    if (duneWords(request.text) && wide)
+        return "I raised sand dunes across the area you selected.";
+    if (duneWords(request.text) && request.spot)
+        return "I raised sand dunes around the tile you selected.";
+    if (duneWords(request.text))
+        return "I turned the open ground into sand dunes.";
+    if (wide)
+        return `I painted ${terrain} across the area you selected.`;
+    if (request.spot)
+        return `I painted ${terrain} on the tile you selected.`;
+    return `I painted the ground ${terrain}.`;
+}
+export function supplementLand(requests, world, chosen) {
+    if (requests.length !== 1)
+        return chosen;
+    const request = requests[0];
+    const terrain = request ? landscapeTerrain(request.text) : null;
+    if (!request || !terrain || request.inside || focusEntity(request, world))
+        return chosen;
+    const next = chosen.filter((op) => !isPlaceholder(op));
+    const painted = next.filter((op) => op.op === "paint" && op.terrain === terrain);
+    const cells = painted.reduce((sum, op) => sum + op.w * op.h, 0);
+    if (request.spot) {
+        if (cells > 0)
+            return next.slice(0, 48);
+        const paint = landscapePaint(request, world);
+        return paint ? [...next, paint].slice(0, 48) : next;
+    }
+    if (cells >= 12)
+        return next.slice(0, 48);
+    const paints = [];
+    const sources = terrain === "sand" ? ["grass", "dirt", "snow"] : terrain === "snow" ? ["grass", "sand", "dirt"] : terrain === "dirt" ? ["grass"] : ["grass", "dirt"];
+    paintMatching(world, paints, sources, terrain);
+    const withoutTiny = next.filter((op) => !(op.op === "paint" && op.terrain === terrain));
+    return [...paints, ...withoutTiny].slice(0, 48);
+}
 function fitRequestToArea(ops, request, world, area, only) {
     const intent = areaIntent(request.text);
     const mine = (op) => (only && intent ? true : placeBelongs(request, op));
@@ -489,16 +655,19 @@ function fitRequestToArea(ops, request, world, area, only) {
     return [...kept, ...packInArea(world, area, request, places.length ? places : ops.flatMap((op) => (op.op === "place" ? [op] : [])).slice(0, 1), false)];
 }
 export function carrySpot(requests, world, ops) {
-    const pinned = requests.filter((request) => spotBox(request.spot, request.inside) && !focusEntity(request, world));
+    const landscape = applyLandscape(requests, world, ops);
+    if (landscape)
+        return landscape.slice(0, 48);
+    const pinned = requests.filter((request) => spotBox(request.spot, request.inside, world) && !focusEntity(request, world));
     if (!pinned.length)
         return ops;
     let next = ops;
     const singles = pinned.filter((request) => {
-        const area = spotBox(request.spot, request.inside);
+        const area = spotBox(request.spot, request.inside, world);
         return area && area.w * area.h === 1;
     });
     for (const request of pinned) {
-        const area = spotBox(request.spot, request.inside);
+        const area = spotBox(request.spot, request.inside, world);
         if (!area || area.w * area.h === 1)
             continue;
         next = fitRequestToArea(next, request, world, area, requests.length === 1);
@@ -611,9 +780,10 @@ function landmark(requests, world) {
 function addNear(world, ops, anchor, sprite, label, note, terrainOk) {
     const draft = applyOps(world, ops).world;
     const info = SPRITES[sprite];
+    const span = mapSize(draft);
     let best = null;
-    for (let y = 0; y <= GRID_H - info.h; y += 1) {
-        for (let x = 0; x <= GRID_W - info.w; x += 1) {
+    for (let y = 0; y <= span.h - info.h; y += 1) {
+        for (let x = 0; x <= span.w - info.w; x += 1) {
             let ground = true;
             for (let dy = 0; dy < info.h && ground; dy += 1) {
                 for (let dx = 0; dx < info.w; dx += 1)
@@ -697,26 +867,27 @@ function joinNames(list) {
         return `${list[0]} and ${list[1]}`;
     return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
 }
-function paintRect(ops, x, y, w, h, terrain) {
+function paintRect(ops, x, y, w, h, terrain, bounds = { w: GRID_W, h: GRID_H }) {
     const left = Math.max(0, x);
     const top = Math.max(0, y);
-    const right = Math.min(GRID_W, x + w);
-    const bottom = Math.min(GRID_H, y + h);
+    const right = Math.min(bounds.w, x + w);
+    const bottom = Math.min(bounds.h, y + h);
     if (right <= left || bottom <= top)
         return;
     ops.push({ op: "paint", x: left, y: top, w: right - left, h: bottom - top, terrain });
 }
 function paintMatching(world, ops, sources, terrain) {
     const strips = [];
-    for (let y = 0; y < GRID_H; y += 1) {
+    const span = mapSize(world);
+    for (let y = 0; y < span.h; y += 1) {
         let x = 0;
-        while (x < GRID_W) {
+        while (x < span.w) {
             if (!sources.includes(world.terrain[y][x])) {
                 x += 1;
                 continue;
             }
             const start = x;
-            while (x < GRID_W && sources.includes(world.terrain[y][x]))
+            while (x < span.w && sources.includes(world.terrain[y][x]))
                 x += 1;
             const previous = strips.find((strip) => strip.x === start && strip.w === x - start && strip.y + strip.h === y);
             if (previous)
@@ -739,8 +910,9 @@ function clearFootprint(world, ops, x, y, w, h) {
 function moatOrigin(world) {
     let open = null;
     let crowded = null;
-    for (let y = 0; y <= GRID_H - 7; y += 1) {
-        for (let x = 0; x <= GRID_W - 7; x += 1) {
+    const span = mapSize(world);
+    for (let y = 0; y <= span.h - 7; y += 1) {
+        for (let x = 0; x <= span.w - 7; x += 1) {
             let score = y;
             let blocked = false;
             let overlaps = 0;
@@ -768,9 +940,10 @@ function moatOrigin(world) {
 function addPlace(world, ops, sprite, label, note, terrainOk) {
     const info = SPRITES[sprite];
     const draft = applyOps(world, ops).world;
+    const span = mapSize(draft);
     const candidates = [];
-    for (let y = 0; y <= GRID_H - info.h; y += 1) {
-        for (let x = 0; x <= GRID_W - info.w; x += 1) {
+    for (let y = 0; y <= span.h - info.h; y += 1) {
+        for (let x = 0; x <= span.w - info.w; x += 1) {
             let ok = true;
             for (let dy = 0; dy < info.h && ok; dy += 1) {
                 for (let dx = 0; dx < info.w; dx += 1)
@@ -819,8 +992,9 @@ function tilesNeedTerrain(world, x, y, w, h, ok) {
 }
 function openSpot(world, w, h, terrainOk) {
     let best = { x: 0, y: 0, score: Number.POSITIVE_INFINITY };
-    for (let y = 0; y <= GRID_H - h; y += 1) {
-        for (let x = 0; x <= GRID_W - w; x += 1) {
+    const span = mapSize(world);
+    for (let y = 0; y <= span.h - h; y += 1) {
+        for (let x = 0; x <= span.w - w; x += 1) {
             let overlaps = 0;
             for (const entity of world.entities) {
                 const hits = entity.x < x + w && entity.x + entity.w > x && entity.y < y + h && entity.y + entity.h > y;
@@ -865,6 +1039,20 @@ export function planBatch(world, incoming) {
             lines: [{ from: "Director", text: `Changing what ${everyone} selected.` }],
         };
     }
+    if (incoming.length > 0 && incoming.every((request) => onlyGrow(request.text))) {
+        const size = mapSize(world);
+        const margins = fitGrow(size.w, size.h, askedGrowth(incoming) ?? { north: 0, east: 0, south: 0, west: 0 });
+        const grew = margins.north + margins.east + margins.south + margins.west > 0;
+        return {
+            batch: {
+                requestIds: incoming.map((request) => request.id),
+                baseVersion: world.version,
+                ops: grew ? [growOp(margins)] : [],
+                reply: growReply(size.w, size.h, margins),
+            },
+            lines: [{ from: "Director", text: grew ? "Opening more ground around the map." : "The map has no room left to grow." }],
+        };
+    }
     const allTags = new Set();
     for (const request of requests)
         for (const tag of tagsFor(request.text))
@@ -880,10 +1068,11 @@ export function planBatch(world, incoming) {
     const buildOps = [];
     const storyOps = [];
     const concerns = [];
+    const span = mapSize(world);
     if (wantShore) {
-        paintRect(terrainOps, 0, 0, GRID_W, 11, "snow");
-        paintRect(terrainOps, 0, 11, GRID_W, 2, "sand");
-        paintRect(terrainOps, 0, 13, GRID_W, 3, "water");
+        paintRect(terrainOps, 0, 0, span.w, Math.max(1, span.h - 5), "snow", span);
+        paintRect(terrainOps, 0, Math.max(0, span.h - 5), span.w, 2, "sand", span);
+        paintRect(terrainOps, 0, Math.max(0, span.h - 3), span.w, 3, "water", span);
         concerns.push("Winter and a beach want the same ground, so the shore stays sand and the inland fields turn to snow.");
     }
     else {
@@ -894,16 +1083,17 @@ export function planBatch(world, incoming) {
         if (allTags.has("dirt"))
             paintMatching(world, terrainOps, ["grass"], "dirt");
         if (allTags.has("beach")) {
-            paintRect(terrainOps, 0, 12, GRID_W, 2, "sand");
-            paintRect(terrainOps, 0, 14, GRID_W, 2, "water");
+            paintRect(terrainOps, 0, Math.max(0, span.h - 4), span.w, 2, "sand", span);
+            paintRect(terrainOps, 0, Math.max(0, span.h - 2), span.w, 2, "water", span);
         }
     }
     if (allTags.has("hill"))
         paintRect(terrainOps, 1, 1, 6, 3, "stone");
     if (!wantMoat && allTags.has("river")) {
-        paintRect(terrainOps, 0, 7, GRID_W, 1, "sand");
-        paintRect(terrainOps, 0, 8, GRID_W, 1, "water");
-        paintRect(terrainOps, 0, 9, GRID_W, 1, "sand");
+        const mid = Math.floor(span.h / 2);
+        paintRect(terrainOps, 0, Math.max(0, mid - 1), span.w, 1, "sand", span);
+        paintRect(terrainOps, 0, mid, span.w, 1, "water", span);
+        paintRect(terrainOps, 0, Math.min(span.h - 1, mid + 1), span.w, 1, "sand", span);
     }
     else if (!wantMoat && (allTags.has("flood") || allTags.has("lake"))) {
         paintRect(terrainOps, 3, 7, 12, 1, "sand");
@@ -1039,13 +1229,16 @@ export function planBatch(world, incoming) {
     }
     const sky = skyAsk(requests);
     const skyOps = sky ? [{ op: "sky", value: sky }] : [];
-    const ops = carrySpot(incoming, world, [...direct, ...carryMotion(requests, carryColor(requests, carryInterior(requests, world, [...skyOps, ...terrainOps, ...buildOps, ...storyOps])))]).slice(0, 48);
+    const growth = askedGrowth(requests);
+    const fitted = growth ? fitGrow(span.w, span.h, growth) : null;
+    const growOps = fitted && fitted.north + fitted.east + fitted.south + fitted.west > 0 ? [growOp(fitted)] : [];
+    const ops = [...carrySpot(incoming, world, [...direct, ...carryMotion(requests, carryColor(requests, carryInterior(requests, world, [...skyOps, ...terrainOps, ...buildOps, ...storyOps])))]), ...growOps].slice(0, 48);
     const onTile = incoming.some((request) => request.spot) && ops.some((op) => op.op === "place");
     const wide = incoming.some((request) => {
-        const area = spotBox(request.spot, request.inside);
+        const area = spotBox(request.spot, request.inside, world);
         return area != null && area.w * area.h > 1;
     });
-    const reply = [focusReply(direct), replyFor({
+    const reply = landReply(incoming, ops) ?? [focusReply(direct), replyFor({
             wantMoat,
             wantShore,
             castlePeople,
@@ -1055,7 +1248,7 @@ export function planBatch(world, incoming) {
             everyone,
             requests,
             ops,
-        }), onTile ? (wide ? "I built it inside the area you selected." : "I built it on the tile you selected.") : ""]
+        }), onTile ? (wide ? "I built it inside the area you selected." : "I built it on the tile you selected.") : "", fitted && growOps.length ? growReply(span.w, span.h, fitted) : ""]
         .filter(Boolean)
         .join(" ");
     const lines = [

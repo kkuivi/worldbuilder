@@ -2,8 +2,42 @@ import type { SpriteId } from "./sprites.js";
 
 export const GRID_W = 24;
 export const GRID_H = 16;
+export const MAP_MAX_W = 48;
+export const MAP_MAX_H = 32;
+export const MAP_STEP = 4;
 export const ROOM_W = 8;
 export const ROOM_H = 6;
+
+export interface GrowMargins {
+  north: number;
+  east: number;
+  south: number;
+  west: number;
+}
+
+export function mapSize(world: { terrain: unknown[][] }): { w: number; h: number } {
+  const h = world.terrain.length;
+  const w = world.terrain[0]?.length ?? 0;
+  return { w: w || GRID_W, h: h || GRID_H };
+}
+
+export function fitGrow(width: number, height: number, asked: GrowMargins): GrowMargins {
+  let north = Math.max(0, Math.floor(asked.north));
+  let east = Math.max(0, Math.floor(asked.east));
+  let south = Math.max(0, Math.floor(asked.south));
+  let west = Math.max(0, Math.floor(asked.west));
+  const roomW = Math.max(0, MAP_MAX_W - width);
+  const roomH = Math.max(0, MAP_MAX_H - height);
+  if (east + west > roomW) {
+    west = Math.min(west, roomW);
+    east = Math.min(east, roomW - west);
+  }
+  if (north + south > roomH) {
+    north = Math.min(north, roomH);
+    south = Math.min(south, roomH - north);
+  }
+  return { north, east, south, west };
+}
 
 export const TERRAINS = ["grass", "water", "sand", "stone", "snow", "dirt"] as const;
 export type Terrain = (typeof TERRAINS)[number];
@@ -100,6 +134,7 @@ export interface PlayerRequest {
 export type EditOp =
   | { op: "paint"; x: number; y: number; w: number; h: number; terrain: Terrain }
   | { op: "sky"; value: Sky }
+  | { op: "grow"; north: number; east: number; south: number; west: number }
   | {
       op: "place";
       kind: EntityKind;

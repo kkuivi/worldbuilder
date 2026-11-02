@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { PLAYER_COLORS, canEnter, type Entity, type Player, type WorldState } from "@worldbuilder/contracts";
+import { PLAYER_COLORS, canEnter, MAP_MAX_H, MAP_MAX_W, mapSize, type Entity, type Player, type WorldState } from "@worldbuilder/contracts";
 import { MapView } from "./MapView";
 import { useWorld } from "./useWorld";
 
@@ -301,6 +301,16 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
   const inside = world?.entities.find((entity) => entity.id === insideId && canEnter(entity)) ?? null;
   const [sendError, setSendError] = useState("");
   const company = (world?.players ?? []).filter((item) => item.inside === insideId && item.id !== player.id);
+  const mapKey = world ? `${mapSize(world).w}x${mapSize(world).h}` : "";
+  const seenMap = useRef(mapKey);
+  useEffect(() => {
+    if (!mapKey) return;
+    if (seenMap.current && seenMap.current !== mapKey) {
+      setTile(null);
+      setSelectedId(null);
+    }
+    seenMap.current = mapKey;
+  }, [mapKey]);
 
   useEffect(() => {
     locate(inside?.id ?? null);
@@ -377,6 +387,11 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
                   });
                 }}
                 onMove={move}
+                onExpand={() => {
+                  const size = world ? mapSize(world) : { w: 0, h: 0 };
+                  if (size.w >= MAP_MAX_W && size.h >= MAP_MAX_H) return;
+                  void say("Expand the map");
+                }}
               />
               {inside ? (
                 <div className="room-bar">
@@ -477,7 +492,7 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
                     : ["Add a neighborhood", "Add trees", "Add a road"]
                 : inside
                   ? ["Add a couch", "Add a table", "Add a rug"]
-                  : ["Add a village", "Make a river", "It should be winter"]
+                  : ["Add a village", "Make a river", "It should be winter", "Expand the map"]
             ).map((suggestion) => (
                 <button key={suggestion} type="button" onClick={() => void send(suggestion)}>
                   {suggestion}
