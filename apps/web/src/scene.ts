@@ -6,6 +6,8 @@ import {
   mapSize,
   ROOM_H,
   ROOM_W,
+  HILL_STEP,
+  STORY_MAX,
   TERRAIN_HEIGHT,
   airborne,
   inventModel,
@@ -212,6 +214,8 @@ export function createScene(
 
   function cellHeight(kind: Terrain, x: number, y: number) {
     const base = TERRAIN_HEIGHT[kind];
+    const extra = world?.rise?.[y]?.[x] ?? 0;
+    if (extra > 0) return base + extra * HILL_STEP;
     if (kind !== "sand" || !world) return base;
     const around: Array<[number, number]> = [
       [1, 0],
@@ -663,6 +667,7 @@ function buildEntity(entity: Entity) {
   const spec = modelSpec(entity);
   if (spec) {
     drawModel(group, spec);
+    liftFloors(group, sx, sz, entity.stories ?? 1, 1.15, tint(entity.label, 0xc48945));
     group.rotation.y = yaw(entity.id);
     return group;
   }
@@ -674,13 +679,13 @@ function buildEntity(entity: Entity) {
     drawVaried(group, entity.label);
     group.rotation.y = yaw(entity.id);
   } else {
-    shape(group, entity.sprite, sx, sz, entity.label);
+    shape(group, entity.sprite, sx, sz, entity.label, entity.stories ?? 1);
     if (SPIN.has(entity.sprite)) group.rotation.y = yaw(entity.id);
   }
   return group;
 }
 
-function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number, label = "") {
+function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number, label = "", stories = 1) {
   switch (sprite) {
     case "tree_oak": {
       const radius = Math.max(sx, sz) * 0.46;
@@ -720,19 +725,22 @@ function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number, lab
       cylinder(group, 0.26, 0.06, 0x5c3a22, 0, 0.28, 0);
       return;
     case "house_small":
-      house(group, sx, sz, 0xf6e6c8, 0xd4543c);
+      house(group, sx, sz, 0xf6e6c8, 0xd4543c, stories);
       return;
     case "house_large":
-      house(group, sx, sz, 0xe4cfa6, 0x8c3428);
+      house(group, sx, sz, 0xe4cfa6, 0x8c3428, stories);
       return;
-    case "tower":
+    case "tower": {
+      const lift = liftFloors(group, sx * 0.7, sz * 0.7, stories, 2.15, 0xc5ced6);
       box(group, sx * 0.55, 2.15, sz * 0.55, 0xc5ced6, 0, 1.08, 0);
-      cone(group, sx * 0.42, 0.72, 0x8c3428, 0, 2.5, 0);
+      cone(group, sx * 0.42, 0.72, 0x8c3428, 0, 2.5 + lift, 0);
       box(group, 0.22, 0.36, 0.08, 0x5c3a22, 0, 0.2, sz * 0.28);
       return;
+    }
     case "castle": {
+      const lift = liftFloors(group, sx * 0.62, sz * 0.62, stories, 1.28, 0x9aa3ad);
       box(group, sx * 0.62, 1.2, sz * 0.62, 0x9aa3ad, 0, 0.6, 0);
-      box(group, sx * 0.72, 0.12, sz * 0.72, 0x66717c, 0, 1.22, 0);
+      box(group, sx * 0.72, 0.12, sz * 0.72, 0x66717c, 0, 1.22 + lift, 0);
       const ox = sx * 0.38;
       const oz = sz * 0.38;
       for (const [x, z] of [
@@ -741,8 +749,8 @@ function shape(group: THREE.Group, sprite: SpriteId, sx: number, sz: number, lab
         [-ox, oz],
         [ox, oz],
       ]) {
-        box(group, 0.46, 1.75, 0.46, 0x6e7782, x, 0.88, z);
-        box(group, 0.56, 0.12, 0.56, 0x4e575f, x, 1.78, z);
+        box(group, 0.46, 1.75 + lift, 0.46, 0x6e7782, x, (1.75 + lift) / 2, z);
+        box(group, 0.56, 0.12, 0.56, 0x4e575f, x, 1.78 + lift, z);
       }
       box(group, 0.36, 0.52, 0.08, 0x5c3a22, 0, 0.26, sz * 0.32);
       return;
@@ -1100,11 +1108,24 @@ function hashColor(text: string) {
   return palette[hash(text.length, text.charCodeAt(0) || 1) % palette.length] ?? 0xc23b3b;
 }
 
-function house(group: THREE.Group, sx: number, sz: number, wall: number, roof: number) {
+function liftFloors(group: THREE.Group, sx: number, sz: number, stories: number, baseTop: number, wall: number) {
+  const extra = Math.max(0, Math.min(STORY_MAX, stories) - 1);
+  const storyH = 0.62;
+  for (let i = 0; i < extra; i += 1) {
+    const y = baseTop + storyH * i + storyH / 2;
+    box(group, Math.max(0.4, sx * 0.92), storyH, Math.max(0.4, sz * 0.92), wall, 0, y, 0);
+    box(group, 0.16, 0.2, 0.05, 0x9fd4ef, -sx * 0.22, y, sz * 0.46);
+    box(group, 0.16, 0.2, 0.05, 0x9fd4ef, sx * 0.22, y, sz * 0.46);
+  }
+  return extra * storyH;
+}
+
+function house(group: THREE.Group, sx: number, sz: number, wall: number, roof: number, stories = 1) {
+  const lift = liftFloors(group, sx, sz, stories, 0.72, wall);
   box(group, sx, 0.72, sz, wall, 0, 0.36, 0);
-  cone(group, Math.max(sx, sz) * 0.64, 0.58, roof, 0, 1.01, 0);
+  cone(group, Math.max(sx, sz) * 0.64, 0.58, roof, 0, 1.01 + lift, 0);
   box(group, Math.min(0.28, sx * 0.22), 0.4, 0.08, 0x5c3a22, 0, 0.2, sz / 2 + 0.01);
-  box(group, 0.16, 0.32, 0.16, 0x66717c, sx * 0.28, 0.78, -sz * 0.12);
+  box(group, 0.16, 0.32, 0.16, 0x66717c, sx * 0.28, 0.78 + lift, -sz * 0.12);
 }
 
 function person(group: THREE.Group, cloth: number, scale: number) {

@@ -284,14 +284,21 @@ input {
 .inspector header { display: flex; justify-content: space-between; gap: 8px; }
 .inspector button { border: 0; background: transparent; font-weight: 600; }
 .inspector .meta { color: #5c6b64; font-size: 0.85rem; }
-.inspector .enter {
-  justify-self: start;
-  border: 2px solid #1e3a2f;
+.inspector .actions { display: flex; gap: 8px; }
+.inspector .enter, .inspector .delete {
   border-radius: 999px;
   padding: 6px 12px;
+  font-weight: 650;
+}
+.inspector .enter {
+  border: 2px solid #1e3a2f;
   background: #1e3a2f;
   color: #fffdf8;
-  font-weight: 650;
+}
+.inspector .delete {
+  border: 2px solid #8d3a32;
+  background: #fffdf8;
+  color: #8d3a32;
 }
 .room-bar {
   position: absolute;

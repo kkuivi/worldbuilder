@@ -1,6 +1,7 @@
 import { editBatchSchema, renderDigest, type EditBatch, type WorldState } from "@worldbuilder/contracts";
-import { applyOps, carryColor, carryFocus, carryInterior, carryMotion, carrySpot, landReply, planBatch, supplementGrow, supplementLand, supplementProps, supplementSky, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
+import { applyOps, attachShapes, carryColor, carryFocus, carryInterior, carryMotion, carrySpot, landReply, planBatch, spreadReply, supplementGrow, supplementLand, supplementProps, supplementSky, supplementStories, type PlanRequest, type StatusLine } from "@worldbuilder/engine";
 import { env } from "./env";
+import { lookupShape } from "./shape";
 
 const SYSTEM = `You are the world builder in a shared map that several players edit at once.
 The digest states the current grid size. A new world starts 24 wide and 16 tall, and it can grow to 48 by 32. Coordinates start at 0 in the top left. When a player asks to expand the map, make it bigger, or add more land, emit a grow op such as { "op": "grow", "north": 4, "east": 4, "south": 4, "west": 4 }. Use north, east, south, or west alone when they name a side.
@@ -20,8 +21,10 @@ Rules
 - Winter plus a beach becomes snow inland and a sandy shore with water at the bottom.
 - Stay inside the grid and use only sprite ids from the catalog you are given. Placement rules still apply to the finished ops: houses, towers, castles, and trees cannot sit on water; bridges sit on water or sand; roads cannot sit on water; boats need water; entities cannot overlap. Put a road on open ground beside the building, not on tiles that building already covers.
 - Never refuse because a request does not fit, is too big, or would disturb what is already on the map. Do not say it would break the map, and do not ask for a smaller change. If something is in the way, remove it, repaint the ground, and place what they asked for.
-- Sand dunes, a desert, or sand is a paint of sand across the selected area, or across the open grass when nothing is selected. Hills are stone. Snow or winter paints snow. Never place a prop, marker, or sign for ground.
-- Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. A field of sand rises and falls into dunes. Painting a tile changes its height. There is no separate height operation.
+- Sand dunes, a desert, or sand is a paint of sand across the selected area, or across the open grass when nothing is selected. A new hill is stone. Snow or winter paints snow. Never place a prop, marker, or sign for ground.
+- Making a hill taller, higher, or steeper raises that ground. Emit { "op": "raise", "x": 0, "y": 0, "w": 6, "h": 4, "by": 1 } for the hill or the selected area. Do not only repaint stone; stone that is already there does not get taller from another paint.
+- Making a house, tower, castle, or other building taller, higher, or asking for another story adds one floor. Emit an update op with "stories" set to the new count, from 2 up to 6. Keep the same building. Do not replace it with a new one.
+- Height follows the terrain: water is lowest, then sand, dirt, grass, snow, and stone is highest. A field of sand rises and falls into dunes. Raised stone stands higher still. Painting a tile changes its surface.
 - Night and day change the whole sky. Emit { "op": "sky", "value": "night" } or "day". A note on a building does not make it night.
 - Give each thing a sprite from the catalog and a label. Use notes for short lore, one sentence at most.
 Ops are paint, place, move, remove, or update.`;
@@ -76,14 +79,48 @@ async function httpObject(system: string, prompt: string): Promise<unknown | nul
   return JSON.parse(content) as unknown;
 }
 
-async function complete(system: string, prompt: string, schema: { safeParse: (value: unknown) => { success: boolean; data?: unknown } }) {
+function salvageBatch(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const batch = value as { ops?: unknown[] };
+  if (!Array.isArray(batch.ops)) return value;
+  const ops = [];
+  for (const op of batch.ops) {
+    if (!op || typeof op !== "object") continue;
+    const row = op as Record<string, unknown>;
+    if (row.op === "paint") {
+      if (typeof row.terrain !== "string" || !row.terrain.trim()) continue;
+      if (!Number.isFinite(row.x) || !Number.isFinite(row.y)) continue;
+      ops.push(row);
+      continue;
+    }
+    if (row.op === "place") {
+      if (typeof row.label !== "string" || !row.label.trim()) continue;
+      const kind = typeof row.kind === "string" && row.kind.trim() ? row.kind : "custom";
+      const sprite = typeof row.sprite === "string" && row.sprite.trim() ? row.sprite : "prop";
+      const x = Number.isFinite(row.x) ? row.x : 0;
+      const y = Number.isFinite(row.y) ? row.y : 0;
+      ops.push({ ...row, kind, sprite, x, y });
+      continue;
+    }
+    ops.push(row);
+  }
+  return { ...batch, ops };
+}
+
+async function complete(system: string, prompt: string, schema: { safeParse: (value: unknown) => { success: boolean; data?: unknown; error?: { issues: Array<{ path: Array<string | number>; message: string }> } } }) {
   const fromHttp = await httpObject(system, prompt);
-  const parsedHttp = fromHttp ? schema.safeParse(fromHttp) : null;
+  const parsedHttp = fromHttp ? schema.safeParse(salvageBatch(fromHttp)) : null;
   if (parsedHttp?.success) return parsedHttp.data;
+  if (parsedHttp && !parsedHttp.success) console.warn("Builder reply rejected:", parsedHttp.error?.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "));
   const fromMastra = await mastraObject(system, prompt, schema);
-  const parsedMastra = fromMastra ? schema.safeParse(fromMastra) : null;
+  const parsedMastra = fromMastra ? schema.safeParse(salvageBatch(fromMastra)) : null;
   if (parsedMastra?.success) return parsedMastra.data;
   return null;
+}
+
+async function withShapes(batch: EditBatch, lines: StatusLine[]): Promise<{ batch: EditBatch; lines: StatusLine[] }> {
+  const ops = await attachShapes(batch.ops, lookupShape);
+  return { batch: { ...batch, ops }, lines };
 }
 
 export async function composeBatch(world: WorldState, requests: PlanRequest[]): Promise<{ batch: EditBatch; lines: StatusLine[] }> {
@@ -96,21 +133,21 @@ export async function composeBatch(world: WorldState, requests: PlanRequest[]): 
       directorPass(world, requests),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 22_000)),
     ]);
-    if (!ai) return local;
-    const ops = supplementGrow(requests, world, supplementLand(requests, world, carrySpot(requests, world, carryFocus(requests, world, carryMotion(requests, carryColor(requests, carryInterior(requests, world, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops))))))));
+    if (!ai) return withShapes(local.batch, local.lines);
+    const ops = supplementGrow(requests, world, supplementStories(requests, world, supplementLand(requests, world, carrySpot(requests, world, carryFocus(requests, world, carryMotion(requests, carryColor(requests, carryInterior(requests, world, supplementSky(requests, supplementProps(requests, ai.batch.ops, local.batch.ops), local.batch.ops)))))))));
     const dry = applyOps(world, ops);
-    if (dry.applied.length === 0 && local.batch.ops.length > 0) return local;
+    if (dry.applied.length === 0 && local.batch.ops.length > 0) return withShapes(local.batch, local.lines);
     const base = /breaking the map|smaller change/i.test(ai.batch.reply) || ops.length > ai.batch.ops.length
       ? local.batch.reply
       : ai.batch.reply;
     const wide = requests.some((request) => (request.spot?.w ?? 1) * (request.spot?.h ?? 1) > 1);
     const note = wide ? "I built it inside the area you selected." : "I built it on the tile you selected.";
     const spotted = requests.some((request) => request.spot) && ops.some((op) => op.op === "place");
-    const reply = landReply(requests, ops) ?? (spotted && !base.includes(note) ? `${base} ${note}`.trim() : base);
-    return {
-      batch: { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops, reply },
-      lines: ai.lines,
-    };
+    const reply = landReply(requests, ops) ?? spreadReply(requests, ops) ?? (spotted && !base.includes(note) ? `${base} ${note}`.trim() : base);
+    return withShapes(
+      { ...ai.batch, requestIds: requests.map((request) => request.id), baseVersion: world.version, ops, reply },
+      ai.lines,
+    );
   } catch (error) {
     console.warn("Builder fell back to the local team:", error instanceof Error ? error.message : error);
     return local;

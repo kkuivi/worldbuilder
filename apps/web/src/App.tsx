@@ -292,7 +292,7 @@ function Gate({
 }
 
 function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Player; onLeave: () => void }) {
-  const { world, status, log, connection, error, accent, busy, say, locate, move } = useWorld(roomId, player);
+  const { world, status, log, connection, error, accent, busy, say, locate, move, remove } = useWorld(roomId, player);
   const [draft, setDraft] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tile, setTile] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -316,6 +316,12 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
     locate(inside?.id ?? null);
   }, [inside?.id, locate]);
 
+  useEffect(() => {
+    if (!world) return;
+    if (selectedId && !world.entities.some((entity) => entity.id === selectedId)) setSelectedId(null);
+    if (insideId && !world.entities.some((entity) => entity.id === insideId && canEnter(entity))) setInsideId(null);
+  }, [world, selectedId, insideId]);
+
   async function send(text = draft) {
     if (!text.trim()) return;
     setSendError("");
@@ -331,6 +337,18 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
     setInsideId(entity.id);
     setSelectedId(null);
     setTile(null);
+  }
+
+  async function deleteSelected(entity: Entity) {
+    setSelectedId(null);
+    if (insideId === entity.id) setInsideId(null);
+    setSendError("");
+    try {
+      const gone = await remove(entity.id);
+      if (!gone) setSendError("That could not be removed.");
+    } catch (reason) {
+      setSendError(reason instanceof Error ? reason.message : "That could not be removed.");
+    }
   }
 
   return (
@@ -433,11 +451,16 @@ function WorldScreen({ roomId, player, onLeave }: { roomId: string; player: Play
               <p className="meta">
                 {shownKind(selected)} · {creatorName(world, selected.createdBy)} · drag it to move
               </p>
-              {canEnter(selected) ? (
-                <button className="enter" type="button" onClick={() => enterBuilding(selected)}>
-                  Go inside
+              <div className="actions">
+                {canEnter(selected) ? (
+                  <button className="enter" type="button" onClick={() => enterBuilding(selected)}>
+                    Go inside
+                  </button>
+                ) : null}
+                <button className="delete" type="button" onClick={() => void deleteSelected(selected)}>
+                  Delete
                 </button>
-              ) : null}
+              </div>
             </article>
           ) : null}
         </div>

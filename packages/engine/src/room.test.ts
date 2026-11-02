@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { TERRAIN_HEIGHT, airborne, editBatchSchema, inventModel, mapSize, modelFor, namedColor, parseModel, portrayal, renderDigest } from "@worldbuilder/contracts";
+import { TERRAIN_HEIGHT, airborne, canonicalModel, editBatchSchema, inventModel, isStockBlob, mapSize, modelFor, namedColor, parseModel, portrayal, renderDigest, shapeKey, usableModel } from "@worldbuilder/contracts";
 import { applyOps, nudgeRejectedPlaces } from "./apply.js";
+import { attachShapes } from "./shape.js";
 import { carryColor, carrySpot, planBatch, supplementLand, supplementProps } from "./plan.js";
 import { WorldRoom } from "./room.js";
 
@@ -344,6 +345,17 @@ describe("world room", () => {
     expect(parsed.success).toBe(true);
   });
 
+  test("builds a church with a steeple instead of a blob", () => {
+    const blob = "box 0.46 0.36 0.4 c48945 0 0.28 0\nsphere 0.16 0 0 efb423 0 0.58 0\nbox 0.18 0.08 0.14 3d342c 0 0.12 0.16";
+    expect(portrayal("Church")).toBe("building");
+    expect(modelFor("Church", blob)).toBe(inventModel("Church"));
+    const church = parseModel(inventModel("Church"));
+    expect(church?.some((part) => part.shape === "cone" && part.y > 1)).toBe(true);
+    expect(church?.some((part) => part.shape === "box" && part.a < 0.08 && part.b > 0.1)).toBe(true);
+    expect(portrayal("School")).toBe("building");
+    expect(inventModel("School")).not.toContain("sphere 0.16");
+  });
+
   test("replaces a stack of boxes with a blue tree", () => {
     const boxes = "box 0.5 2 0.5 0000FF 0 0 0\nbox 0.4 1 0.4 0000FF 0 1 0";
     expect(portrayal("Blue Tree")).toBe("tree");
@@ -441,6 +453,46 @@ describe("world room", () => {
     const rejected = room.relocate(crate!.id, tree!.x, tree!.y);
     expect(rejected.ok).toBe(false);
     expect(room.view().entities.find((entity) => entity.id === crate!.id)?.x).toBe(spot!.x + 1);
+    const removed = room.remove(crate!.id);
+    expect(removed.ok).toBe(true);
+    expect(room.view().entities.some((entity) => entity.id === crate!.id)).toBe(false);
+    expect(room.view().chat.length).toBe(lines);
+    expect(room.remove(crate!.id).ok).toBe(false);
+  });
+
+  test("deleting a building removes its furniture and sends people outside", () => {
+    const room = new WorldRoom("DROP");
+    const world = room.start("Wilds");
+    room.join({ id: "p", name: "Jonnyy", color: "#3b6fe0", joinedAt: new Date().toISOString() });
+    let spot: { x: number; y: number } | null = null;
+    for (let y = 0; y < world.terrain.length - 1 && !spot; y += 1) {
+      for (let x = 0; x < (world.terrain[y]?.length ?? 0) - 1; x += 1) {
+        const open = [0, 1].every((dy) => [0, 1].every((dx) => world.terrain[y + dy]?.[x + dx] === "grass" && !world.entities.some((entity) => x + dx < entity.x + entity.w && x + dx + 1 > entity.x && y + dy < entity.y + entity.h && y + dy + 1 > entity.y)));
+        if (open) spot = { x, y };
+      }
+    }
+    expect(spot).not.toBeNull();
+    const placed = room.applyEdits({
+      requestIds: [],
+      baseVersion: room.view().version,
+      reply: "a cottage",
+      ops: [{ op: "place", kind: "house", x: spot!.x, y: spot!.y, sprite: "house_small", label: "Cottage" }],
+    });
+    expect(placed.rejected).toEqual([]);
+    const cottage = room.view().entities.find((entity) => entity.label === "Cottage");
+    expect(cottage).toBeTruthy();
+    const furnished = room.applyEdits({
+      requestIds: [],
+      baseVersion: room.view().version,
+      reply: "a couch",
+      ops: [{ op: "place", kind: "custom", x: 1, y: 1, sprite: "prop", label: "Couch", inside: cottage!.id }],
+    });
+    expect(furnished.rejected).toEqual([]);
+    room.locate("p", cottage!.id);
+    expect(room.view().players.find((player) => player.id === "p")?.inside).toBe(cottage!.id);
+    expect(room.remove(cottage!.id).ok).toBe(true);
+    expect(room.view().entities.some((entity) => entity.id === cottage!.id || entity.inside === cottage!.id)).toBe(false);
+    expect(room.view().players.find((player) => player.id === "p")?.inside).toBeUndefined();
   });
 
   test("chat changes the object the player selected", () => {
@@ -591,5 +643,151 @@ describe("world room", () => {
     expect(open.batch.ops.some((op) => op.op === "place")).toBe(false);
     expect(open.batch.ops.some((op) => op.op === "paint" && op.terrain === "sand")).toBe(true);
     expect(open.batch.reply).toBe("I turned the open ground into sand dunes.");
+  });
+
+  test("rafters fill the selected area instead of a marker", () => {
+    const room = new WorldRoom("BEAM");
+    const world = room.start("Wilds");
+    const spot = { x: 2, y: 10, w: 6, h: 3 };
+    const plan = planBatch(world, [{ id: "r", playerId: "a", playerName: "Jonnyy", text: "add rafters", spot }]);
+    const beams = plan.batch.ops.filter((op) => op.op === "place");
+    expect(beams.length).toBeGreaterThanOrEqual(6);
+    expect(beams.every((op) => op.op === "place" && op.label === "Rafter" && op.sprite === "prop" && op.x >= 2 && op.x < 8 && op.y >= 10 && op.y < 13)).toBe(true);
+    expect(beams.some((op) => op.op === "place" && op.y === 10)).toBe(true);
+    expect(beams.some((op) => op.op === "place" && op.y === 12)).toBe(true);
+    expect(plan.batch.ops.some((op) => op.op === "place" && (op.label === "Marker" || op.sprite === "sign"))).toBe(false);
+    expect(plan.batch.reply).toBe("I raised rafters across the area you selected.");
+    expect(inventModel("Rafter")).toContain("cylinder");
+    const applied = applyOps(world, plan.batch.ops);
+    expect(applied.rejected).toEqual([]);
+    expect(applied.world.entities.filter((entity) => entity.label === "Rafter").length).toBe(beams.length);
+
+    const one = planBatch(world, [{ id: "g", playerId: "a", playerName: "Jonnyy", text: "add a gazebo", spot }]);
+    const gazebos = one.batch.ops.filter((op) => op.op === "place");
+    expect(gazebos).toHaveLength(1);
+    expect(gazebos[0]).toMatchObject({ label: "Gazebo", sprite: "prop" });
+  });
+
+  test("making a hill taller raises the stone instead of repainting it", () => {
+    const room = new WorldRoom("HILL");
+    const world = room.start("Wilds");
+    const spot = { x: 0, y: 0, w: 6, h: 4 };
+    const hill = planBatch(world, [{ id: "h", playerId: "a", playerName: "Jonnyy", text: "add a hill", spot }]);
+    const laid = applyOps(world, hill.batch.ops);
+    expect(laid.rejected).toEqual([]);
+    expect(laid.world.terrain[0][0]).toBe("stone");
+    expect(laid.world.rise?.[0]?.[0] ?? 0).toBe(0);
+
+    const taller = planBatch(laid.world, [{ id: "t", playerId: "a", playerName: "Jonnyy", text: "make the hill taller", spot }]);
+    expect(taller.batch.ops).toEqual([{ op: "raise", x: 0, y: 0, w: 6, h: 4, by: 1 }]);
+    expect(taller.batch.reply).toBe("I made the hill in that area taller.");
+    let current = applyOps(laid.world, taller.batch.ops).world;
+    expect(current.rise?.[0]?.[0]).toBe(1);
+    expect(current.rise?.[3]?.[5]).toBe(1);
+    expect(current.terrain[4]?.[0]).not.toBe("stone");
+
+    for (let step = 0; step < 3; step += 1) {
+      const next = planBatch(current, [{ id: `t${step}`, playerId: "a", playerName: "Jonnyy", text: "make the hill taller", spot }]);
+      current = applyOps(current, next.batch.ops).world;
+    }
+    expect(current.rise?.[1]?.[1]).toBe(4);
+    const capped = planBatch(current, [{ id: "cap", playerId: "a", playerName: "Jonnyy", text: "make the hill taller", spot }]);
+    expect(capped.batch.ops).toEqual([]);
+    expect(capped.batch.reply).toBe("The hill is already as tall as it can be.");
+  });
+
+  test("making a building taller adds a story", () => {
+    const room = new WorldRoom("STORY");
+    const world = room.start("Wilds");
+    const placed = applyOps(world, [
+      { op: "place", kind: "house", x: 0, y: 0, sprite: "house_small", label: "Cottage" },
+      { op: "place", kind: "tree", x: 4, y: 0, sprite: "tree_oak", label: "Oak" },
+    ]);
+    expect(placed.rejected).toEqual([]);
+    const cottage = placed.world.entities.find((entity) => entity.label === "Cottage");
+    const oak = placed.world.entities.find((entity) => entity.label === "Oak");
+    expect(cottage).toBeTruthy();
+    const taller = planBatch(placed.world, [{ id: "t", playerId: "a", playerName: "Jonnyy", text: "make it taller", focus: cottage!.id }]);
+    expect(taller.batch.ops).toEqual([{ op: "update", id: cottage!.id, stories: 2 }]);
+    expect(taller.batch.reply).toBe("I added a story, so it is 2 stories tall.");
+    const raised = applyOps(placed.world, taller.batch.ops);
+    expect(raised.rejected).toEqual([]);
+    expect(raised.world.entities.find((entity) => entity.id === cottage!.id)?.stories).toBe(2);
+    expect(raised.world.entities.find((entity) => entity.id === oak!.id)?.stories).toBeUndefined();
+
+    const named = planBatch(raised.world, [{ id: "n", playerId: "a", playerName: "Jonnyy", text: "make the cottage taller" }]);
+    expect(named.batch.ops).toEqual([{ op: "update", id: cottage!.id, stories: 3 }]);
+
+    const all = planBatch(placed.world, [{ id: "b", playerId: "a", playerName: "Jonnyy", text: "make the buildings taller" }]);
+    expect(all.batch.ops).toEqual([{ op: "update", id: cottage!.id, stories: 2 }]);
+    expect(all.batch.ops.some((op) => op.op === "update" && op.id === oak!.id)).toBe(false);
+
+    const hill = planBatch(placed.world, [{ id: "h", playerId: "a", playerName: "Jonnyy", text: "make the hill taller", spot: { x: 0, y: 0, w: 4, h: 3 } }]);
+    expect(hill.batch.ops.some((op) => op.op === "update")).toBe(false);
+
+    let current = raised.world;
+    for (let step = 0; step < 4; step += 1) {
+      const next = planBatch(current, [{ id: `s${step}`, playerId: "a", playerName: "Jonnyy", text: "add another story", focus: cottage!.id }]);
+      current = applyOps(current, next.batch.ops).world;
+    }
+    expect(current.entities.find((entity) => entity.id === cottage!.id)?.stories).toBe(6);
+    const full = planBatch(current, [{ id: "full", playerId: "a", playerName: "Jonnyy", text: "make it taller", focus: cottage!.id }]);
+    expect(full.batch.ops).toEqual([]);
+    expect(full.batch.reply).toBe("That building is already as tall as it can be.");
+  });
+
+  test("an unknown name keeps a looked-up shape instead of the blob", async () => {
+    const tractor = [
+      "cylinder 0.08 0.2 0 222222 -0.22 0.1 0.16",
+      "cylinder 0.08 0.2 0 222222 0.22 0.1 0.16",
+      "box 0.72 0.28 0.4 2f8f3a 0 0.34 0",
+      "box 0.36 0.22 0.32 2f8f3a 0.16 0.56 0",
+      "sphere 0.1 0 0 eeeeee 0.38 0.56 0.12",
+    ].join("\n");
+    expect(shapeKey("The little Red Tractor")).toBe("tractor");
+    expect(canonicalModel("box 0.4 0.8 0.4 aa0000 0 0 0\nsphere 0.2 0 0 111111 0 0.2 0\ncylinder 0.1 0.4 0 222222 0.3 0 0")).toContain("box 0.4 0.8 0.4 aa0000 0 0.4 0");
+    expect(isStockBlob(inventModel("Gazebo"))).toBe(true);
+    expect(usableModel(tractor)).toBe(true);
+    expect(modelFor("Gazebo", inventModel("Gazebo"))).toBe(inventModel("Gazebo"));
+    expect(modelFor("Gazebo", tractor)).toBe(tractor);
+
+    let calls = 0;
+    const ops = await attachShapes(
+      [
+        { op: "place", kind: "custom", x: 2, y: 2, sprite: "prop", label: "Red Tractor", model: inventModel("Red Tractor") },
+        { op: "place", kind: "custom", x: 4, y: 2, sprite: "prop", label: "Blue Tractor", model: inventModel("Blue Tractor") },
+        { op: "place", kind: "custom", x: 6, y: 2, sprite: "prop", label: "Church" },
+        { op: "place", kind: "custom", x: 8, y: 2, sprite: "prop", label: "Cow" },
+        { op: "update", id: "ent_gazebo", label: "Gazebo" },
+      ],
+      async (key) => {
+        calls += 1;
+        expect(["tractor", "gazebo"]).toContain(key);
+        return key === "gazebo" ? null : tractor;
+      },
+    );
+    expect(calls).toBe(2);
+    const red = ops.find((op) => op.op === "place" && op.label === "Red Tractor");
+    const blue = ops.find((op) => op.op === "place" && op.label === "Blue Tractor");
+    const church = ops.find((op) => op.op === "place" && op.label === "Church");
+    const cow = ops.find((op) => op.op === "place" && op.label === "Cow");
+    const gazebo = ops.find((op) => op.op === "update");
+    expect(red?.op === "place" && red.model?.includes("c23b3b")).toBe(true);
+    expect(red?.op === "place" && red.model?.includes("222222")).toBe(true);
+    expect(red?.op === "place" && isStockBlob(red.model ?? "")).toBe(false);
+    expect(blue?.op === "place" && blue.model?.includes("3b6fe0")).toBe(true);
+    expect(church?.op === "place" && church.model).toBeUndefined();
+    expect(cow?.op === "place" && cow.model).toBeUndefined();
+    expect(gazebo?.op === "update" && gazebo.model).toBeUndefined();
+
+    const room = new WorldRoom("SHAP");
+    const world = room.start("Shapes");
+    const placed = applyOps(world, ops.filter((op) => op.op === "place" && op.label === "Red Tractor"));
+    const entity = placed.world.entities.find((item) => item.label === "Red Tractor");
+    expect(entity?.model?.includes("c23b3b")).toBe(true);
+    expect(modelFor("Red Tractor", entity?.model)).toBe(entity?.model);
+
+    const renamed = applyOps(placed.world, [{ op: "update", id: entity!.id, label: "Wagon", model: tractor }]);
+    expect(renamed.world.entities.find((item) => item.id === entity!.id)?.model).toBe(tractor);
   });
 });

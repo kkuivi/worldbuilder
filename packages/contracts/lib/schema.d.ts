@@ -25,6 +25,27 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     x: number;
     y: number;
 }>, z.ZodObject<{
+    op: z.ZodLiteral<"raise">;
+    x: z.ZodNumber;
+    y: z.ZodNumber;
+    w: z.ZodNumber;
+    h: z.ZodNumber;
+    by: z.ZodNumber;
+}, "strip", z.ZodTypeAny, {
+    h: number;
+    w: number;
+    op: "raise";
+    x: number;
+    y: number;
+    by: number;
+}, {
+    h: number;
+    w: number;
+    op: "raise";
+    x: number;
+    y: number;
+    by: number;
+}>, z.ZodObject<{
     op: z.ZodLiteral<"sky">;
     value: z.ZodEnum<["day", "night"]>;
 }, "strip", z.ZodTypeAny, {
@@ -62,7 +83,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     label: z.ZodString;
     note: z.ZodOptional<z.ZodString>;
     model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
-    inside: z.ZodOptional<z.ZodString>;
+    inside: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
 }, "strip", z.ZodTypeAny, {
     op: "place";
     x: number;
@@ -86,7 +107,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     w?: number | undefined;
     note?: string | undefined;
     model?: unknown;
-    inside?: string | undefined;
+    inside?: unknown;
 }>, z.ZodObject<{
     op: z.ZodLiteral<"move">;
     id: z.ZodString;
@@ -118,6 +139,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     sprite: z.ZodOptional<z.ZodEnum<["tree_oak", "tree_pine", "bush", "flower", "rock", "stump", "house_small", "house_large", "tower", "castle", "well", "fence", "bridge", "road", "sign", "campfire", "boat", "npc_villager", "npc_knight", "npc_merchant", "npc_child", "animal_cat", "animal_dog", "prop"]>>;
     note: z.ZodOptional<z.ZodString>;
     model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+    stories: z.ZodOptional<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     id: string;
     op: "update";
@@ -125,6 +147,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     label?: string | undefined;
     note?: string | undefined;
     model?: string | undefined;
+    stories?: number | undefined;
 }, {
     id: string;
     op: "update";
@@ -132,6 +155,7 @@ export declare const editOpSchema: z.ZodDiscriminatedUnion<"op", [z.ZodObject<{
     label?: string | undefined;
     note?: string | undefined;
     model?: unknown;
+    stories?: number | undefined;
 }>]>;
 export declare const editBatchSchema: z.ZodObject<{
     requestIds: z.ZodArray<z.ZodString, "many">;
@@ -157,6 +181,27 @@ export declare const editBatchSchema: z.ZodObject<{
         op: "paint";
         x: number;
         y: number;
+    }>, z.ZodObject<{
+        op: z.ZodLiteral<"raise">;
+        x: z.ZodNumber;
+        y: z.ZodNumber;
+        w: z.ZodNumber;
+        h: z.ZodNumber;
+        by: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    }, {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"sky">;
         value: z.ZodEnum<["day", "night"]>;
@@ -195,7 +240,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label: z.ZodString;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
-        inside: z.ZodOptional<z.ZodString>;
+        inside: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
     }, "strip", z.ZodTypeAny, {
         op: "place";
         x: number;
@@ -219,7 +264,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
-        inside?: string | undefined;
+        inside?: unknown;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"move">;
         id: z.ZodString;
@@ -251,6 +296,7 @@ export declare const editBatchSchema: z.ZodObject<{
         sprite: z.ZodOptional<z.ZodEnum<["tree_oak", "tree_pine", "bush", "flower", "rock", "stump", "house_small", "house_large", "tower", "castle", "well", "fence", "bridge", "road", "sign", "campfire", "boat", "npc_villager", "npc_knight", "npc_merchant", "npc_child", "animal_cat", "animal_dog", "prop"]>>;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+        stories: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         id: string;
         op: "update";
@@ -258,6 +304,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        stories?: number | undefined;
     }, {
         id: string;
         op: "update";
@@ -265,6 +312,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: unknown;
+        stories?: number | undefined;
     }>]>, "many">;
     reply: z.ZodString;
 }, "strip", z.ZodTypeAny, {
@@ -278,6 +326,13 @@ export declare const editBatchSchema: z.ZodObject<{
         x: number;
         y: number;
     } | {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    } | {
         value: "day" | "night";
         op: "sky";
     } | {
@@ -313,6 +368,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        stories?: number | undefined;
     })[];
     reply: string;
 }, {
@@ -326,6 +382,13 @@ export declare const editBatchSchema: z.ZodObject<{
         x: number;
         y: number;
     } | {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    } | {
         value: "day" | "night";
         op: "sky";
     } | {
@@ -345,7 +408,7 @@ export declare const editBatchSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
-        inside?: string | undefined;
+        inside?: unknown;
     } | {
         id: string;
         op: "move";
@@ -361,6 +424,7 @@ export declare const editBatchSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: unknown;
+        stories?: number | undefined;
     })[];
     reply: string;
 }>;
@@ -388,6 +452,27 @@ export declare const agentProposalSchema: z.ZodObject<{
         x: number;
         y: number;
     }>, z.ZodObject<{
+        op: z.ZodLiteral<"raise">;
+        x: z.ZodNumber;
+        y: z.ZodNumber;
+        w: z.ZodNumber;
+        h: z.ZodNumber;
+        by: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    }, {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    }>, z.ZodObject<{
         op: z.ZodLiteral<"sky">;
         value: z.ZodEnum<["day", "night"]>;
     }, "strip", z.ZodTypeAny, {
@@ -425,7 +510,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label: z.ZodString;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
-        inside: z.ZodOptional<z.ZodString>;
+        inside: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
     }, "strip", z.ZodTypeAny, {
         op: "place";
         x: number;
@@ -449,7 +534,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
-        inside?: string | undefined;
+        inside?: unknown;
     }>, z.ZodObject<{
         op: z.ZodLiteral<"move">;
         id: z.ZodString;
@@ -481,6 +566,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         sprite: z.ZodOptional<z.ZodEnum<["tree_oak", "tree_pine", "bush", "flower", "rock", "stump", "house_small", "house_large", "tower", "castle", "well", "fence", "bridge", "road", "sign", "campfire", "boat", "npc_villager", "npc_knight", "npc_merchant", "npc_child", "animal_cat", "animal_dog", "prop"]>>;
         note: z.ZodOptional<z.ZodString>;
         model: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
+        stories: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         id: string;
         op: "update";
@@ -488,6 +574,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        stories?: number | undefined;
     }, {
         id: string;
         op: "update";
@@ -495,6 +582,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: unknown;
+        stories?: number | undefined;
     }>]>, "many">;
     rationale: z.ZodString;
     concerns: z.ZodArray<z.ZodString, "many">;
@@ -506,6 +594,13 @@ export declare const agentProposalSchema: z.ZodObject<{
         op: "paint";
         x: number;
         y: number;
+    } | {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
     } | {
         value: "day" | "night";
         op: "sky";
@@ -542,6 +637,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: string | undefined;
+        stories?: number | undefined;
     })[];
     from: "architect" | "naturalist" | "storyteller";
     rationale: string;
@@ -555,6 +651,13 @@ export declare const agentProposalSchema: z.ZodObject<{
         x: number;
         y: number;
     } | {
+        h: number;
+        w: number;
+        op: "raise";
+        x: number;
+        y: number;
+        by: number;
+    } | {
         value: "day" | "night";
         op: "sky";
     } | {
@@ -574,7 +677,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         w?: number | undefined;
         note?: string | undefined;
         model?: unknown;
-        inside?: string | undefined;
+        inside?: unknown;
     } | {
         id: string;
         op: "move";
@@ -590,6 +693,7 @@ export declare const agentProposalSchema: z.ZodObject<{
         label?: string | undefined;
         note?: string | undefined;
         model?: unknown;
+        stories?: number | undefined;
     })[];
     from: "architect" | "naturalist" | "storyteller";
     rationale: string;

@@ -1,4 +1,4 @@
-import { ROOM_H, ROOM_W, SPRITES, canEnter, fitGrow, isSpriteId, inventModel, mapSize, modelFor, parseModel, portrayal, } from "@worldbuilder/contracts";
+import { HILL_MAX, ROOM_H, STORY_MAX, ROOM_W, SPRITES, canEnter, fitGrow, isSpriteId, inventModel, isFurniture, mapSize, modelFor, parseModel, portrayal, usableModel, } from "@worldbuilder/contracts";
 const WATER_FORBIDDEN = new Set(["house", "tower", "castle", "tree"]);
 export function cloneWorld(world) {
     return structuredClone(world);
@@ -142,6 +142,32 @@ function rejectPaint(world, op) {
         return "paint is outside the map";
     return world.terrain[op.y]?.[op.x] ? null : "paint is outside the map";
 }
+function ensureRise(world) {
+    const size = mapSize(world);
+    const current = world.rise ?? [];
+    const rise = [];
+    for (let y = 0; y < size.h; y += 1) {
+        const row = current[y] ?? [];
+        rise.push(Array.from({ length: size.w }, (_, x) => Math.max(0, Math.min(HILL_MAX, Math.floor(row[x] ?? 0)))));
+    }
+    world.rise = rise;
+    return rise;
+}
+function raiseGround(world, op) {
+    if (!inBounds(world, op.x, op.y, op.w, op.h))
+        return "raise is outside the map";
+    const by = Math.max(1, Math.min(3, Math.floor(op.by)));
+    const rise = ensureRise(world);
+    let changed = false;
+    for (const [x, y] of tilesOf(op.x, op.y, op.w, op.h)) {
+        const next = Math.min(HILL_MAX, (rise[y]?.[x] ?? 0) + by);
+        if (world.terrain[y][x] !== "stone" || next !== rise[y][x])
+            changed = true;
+        world.terrain[y][x] = "stone";
+        rise[y][x] = Math.max(rise[y][x] ?? 0, next);
+    }
+    return changed ? null : "the hill is already as tall as it can be";
+}
 function growMap(world, op) {
     const size = mapSize(world);
     const margins = fitGrow(size.w, size.h, op);
@@ -160,6 +186,19 @@ function growMap(world, op) {
         terrain.push(row);
     }
     world.terrain = terrain;
+    if (world.rise) {
+        const rise = [];
+        for (let y = 0; y < nextH; y += 1) {
+            const sourceY = Math.min(size.h - 1, Math.max(0, y - margins.north));
+            const row = [];
+            for (let x = 0; x < nextW; x += 1) {
+                const sourceX = Math.min(size.w - 1, Math.max(0, x - margins.west));
+                row.push(world.rise[sourceY]?.[sourceX] ?? 0);
+            }
+            rise.push(row);
+        }
+        world.rise = rise;
+    }
     if (margins.west || margins.north) {
         for (const entity of world.entities) {
             if (entity.inside)
@@ -185,6 +224,17 @@ function madeSprite(sprite, label, model) {
     const supplied = model?.trim();
     return { sprite, model: supplied && parseModel(supplied) ? supplied : undefined };
 }
+function nextModel(entity, label, supplied) {
+    const name = label?.trim() || entity.label;
+    const changed = Boolean(label?.trim() && label.trim() !== entity.label);
+    if (portrayal(name) !== "custom" || isFurniture(name))
+        return inventModel(name);
+    if (supplied && usableModel(supplied))
+        return supplied.trim();
+    if (changed)
+        return inventModel(name);
+    return entity.model;
+}
 function nextEntityId() {
     spawnCounter += 1;
     return `ent_${Date.now().toString(36)}_${spawnCounter.toString(36)}`;
@@ -200,10 +250,15 @@ function applyOne(world, op, spawned, index) {
         const error = rejectPaint(world, op);
         if (error)
             return error;
-        for (const [x, y] of tilesOf(op.x, op.y, op.w, op.h))
+        for (const [x, y] of tilesOf(op.x, op.y, op.w, op.h)) {
             world.terrain[y][x] = op.terrain;
+            if (world.rise?.[y])
+                world.rise[y][x] = 0;
+        }
         return null;
     }
+    if (op.op === "raise")
+        return raiseGround(world, op);
     if (op.op === "place") {
         const made = madeSprite(op.sprite, op.label, op.model);
         const sprite = SPRITES[made.sprite];
@@ -261,13 +316,24 @@ function applyOne(world, op, spawned, index) {
     const entity = world.entities.find((item) => item.id === op.id);
     if (!entity)
         return `no entity ${op.id}`;
+    if (op.stories !== undefined) {
+        const stories = Math.max(1, Math.min(STORY_MAX, Math.floor(op.stories)));
+        const growing = stories > (entity.stories ?? 1);
+        if (!growing && op.label === undefined && op.sprite === undefined && op.note === undefined && op.model === undefined) {
+            return "that building is already as tall as it can be";
+        }
+        if (growing)
+            entity.stories = stories;
+        if (op.label === undefined && op.sprite === undefined && op.note === undefined && op.model === undefined)
+            return null;
+    }
     const next = {
         ...entity,
         label: op.label?.trim() || entity.label,
         note: op.note !== undefined ? op.note.trim() || undefined : entity.note,
         sprite: op.sprite ?? entity.sprite,
         kind: op.sprite ? SPRITES[op.sprite].kind : entity.kind,
-        model: op.label?.trim() && op.label.trim() !== entity.label ? inventModel(op.label.trim()) : entity.model,
+        model: nextModel(entity, op.label, op.model),
     };
     if (!next.label)
         return "label cannot be empty";

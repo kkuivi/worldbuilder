@@ -3,9 +3,10 @@ import { networkInterfaces } from "node:os";
 import { resolve, sep } from "node:path";
 import type { Player, WorldState } from "@worldbuilder/contracts";
 import { PLAYER_COLORS } from "@worldbuilder/contracts";
-import { nudgeRejectedPlaces, WorldRoom, type RoomDump } from "@worldbuilder/engine";
+import { attachShapes, nudgeRejectedPlaces, WorldRoom, type RoomDump } from "@worldbuilder/engine";
 import { env } from "./env";
 import { composeBatch, mirrorRelay, repairBatch } from "./llm";
+import { lookupShape } from "./shape";
 import { loadDisk, loadRecent, saveDisk, upsertWorld, writeSnapshot, type SavedRoom } from "./persist";
 
 interface SocketData {
@@ -117,9 +118,9 @@ async function runBatch(room: WorldRoom): Promise<void> {
   if (result.rejected.length > 0) {
     const repaired = await repairBatch(room.view(), composed.batch, result.rejected);
     if (repaired) {
-      pendingOps = repaired.ops;
+      pendingOps = await attachShapes(repaired.ops, lookupShape);
       result = room.applyEdits(
-        { ...repaired, requestIds: composed.batch.requestIds, baseVersion: room.view().version },
+        { ...repaired, requestIds: composed.batch.requestIds, baseVersion: room.view().version, ops: pendingOps },
         Date.now(),
         { silent: true },
       );
@@ -286,6 +287,10 @@ function onSocketMessage(socket: BunSocket, raw: string | Buffer): void {
       const moved = room.relocate(message.id, Number(message.x), Number(message.y));
       if (moved.ok) remember(room, meta.get(room.id)?.createdBy ?? message.playerId);
       socket.send(JSON.stringify({ type: "move_result", token: message.token, ok: moved.ok, reason: moved.reason }));
+    } else if (message.type === "remove" && message.playerId && message.id) {
+      const removed = room.remove(message.id);
+      if (removed.ok) remember(room, meta.get(room.id)?.createdBy ?? message.playerId);
+      socket.send(JSON.stringify({ type: "remove_result", token: message.token, ok: removed.ok, reason: removed.reason }));
     } else if (message.type === "say" && message.playerId && message.text) {
       room.say(message.playerId, message.text, typeof message.inside === "string" ? message.inside : undefined, typeof message.focus === "string" ? message.focus : undefined, readSpot(message.spot));
       remember(room, meta.get(room.id)?.createdBy ?? message.playerId);
@@ -393,7 +398,7 @@ async function route(request: Request, url: URL): Promise<Response> {
     return json({ roomId: id, player, world });
   }
 
-  const match = url.pathname.match(/^\/api\/worlds\/([A-Za-z0-9]{4})(?:\/(join|say|state|watch|socket|move))?$/);
+  const match = url.pathname.match(/^\/api\/worlds\/([A-Za-z0-9]{4})(?:\/(join|say|state|watch|socket|move|remove))?$/);
   if (!match) return json({ error: "not found" }, 404);
   const id = match[1].toUpperCase();
   const action = match[2] ?? "";
@@ -445,6 +450,20 @@ async function route(request: Request, url: URL): Promise<Response> {
       broadcast(room, before);
     }
     return json({ ...moved, world: room.view() });
+  }
+
+  if (action === "remove" && request.method === "POST") {
+    if (!room?.started()) return json({ error: "world not found" }, 404);
+    const body = await readJson(request);
+    const playerId = typeof body.playerId === "string" ? body.playerId : "";
+    const entityId = typeof body.id === "string" ? body.id : "";
+    const before = room.currentSeq();
+    const removed = room.remove(entityId);
+    if (removed.ok) {
+      remember(room, meta.get(id)?.createdBy ?? playerId);
+      broadcast(room, before);
+    }
+    return json({ ...removed, world: room.view() });
   }
 
   if (action === "say" && request.method === "POST") {

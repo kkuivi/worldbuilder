@@ -79,6 +79,7 @@ export function useWorld(roomId: string, player: Player) {
           version: payload.version,
           sky: payload.sky ?? current.sky,
           terrain: payload.terrain,
+          rise: payload.rise,
           entities: payload.entities,
           chat: payload.message.text ? appendChat(current.chat, payload.message) : current.chat,
         });
@@ -174,6 +175,36 @@ export function useWorld(roomId: string, player: Player) {
     [commit, player.id, roomId],
   );
 
+  const remove = useCallback(
+    async (id: string) => {
+      const token = `${Date.now()}-${id}-remove`;
+      const socket = socketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN && mode.current === "live") {
+        const result = new Promise<boolean>((resolve) => {
+          moveWait.current.set(token, resolve);
+          window.setTimeout(() => {
+            if (!moveWait.current.has(token)) return;
+            moveWait.current.delete(token);
+            resolve(false);
+          }, 4000);
+        });
+        socket.send(JSON.stringify({ type: "remove", token, playerId: player.id, id }));
+        return result;
+      }
+      const response = await fetch(`/api/worlds/${roomId}/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ playerId: player.id, id }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; reason?: string; world?: WorldState };
+      if (body.world) commit(body.world);
+      if (!body.ok && body.reason) setError(body.reason);
+      else setError("");
+      return Boolean(body.ok);
+    },
+    [commit, player.id, roomId],
+  );
+
   useEffect(() => {
     let stopped = false;
     let pollTimer = 0;
@@ -249,7 +280,7 @@ export function useWorld(roomId: string, player: Player) {
         };
         if (message.type === "state" && message.world) takeSnapshot(message.world, message.events ?? []);
         if (message.type === "event" && message.event) applyEvent(message.event);
-        if (message.type === "move_result" && message.token) {
+        if ((message.type === "move_result" || message.type === "remove_result") && message.token) {
           const finish = moveWait.current.get(message.token);
           if (!message.ok && message.reason) setError(message.reason);
           else setError("");
@@ -280,5 +311,5 @@ export function useWorld(roomId: string, player: Player) {
     };
   }, [applyEvent, commit, player, roomId, takeSnapshot]);
 
-  return { world, status, log, connection, error, accent, busy, say, locate, move };
+  return { world, status, log, connection, error, accent, busy, say, locate, move, remove };
 }

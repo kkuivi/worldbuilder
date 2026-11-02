@@ -38,6 +38,11 @@ export const TERRAIN_HEIGHT = {
     snow: 0.64,
     stone: 1.12,
 };
+/** Extra steps a hill can rise above its terrain. Each step is HILL_STEP world units. */
+export const HILL_MAX = 4;
+export const HILL_STEP = 0.72;
+/** Floors a building can have, including the ground floor. */
+export const STORY_MAX = 6;
 export const ENTITY_KINDS = [
     "tree",
     "house",

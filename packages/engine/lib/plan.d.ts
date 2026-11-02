@@ -25,9 +25,11 @@ export declare function carryColor(requests: PlanRequest[], ops: EditOp[]): Edit
 export declare function supplementSky(requests: PlanRequest[], chosen: EditOp[], _local: EditOp[]): EditOp[];
 export declare function wantsFocusEdit(text: string, entity: Entity): boolean;
 export declare function focusEdits(entity: Entity, text: string): EditOp[];
+export declare function supplementStories(requests: PlanRequest[], world: WorldState, chosen: EditOp[]): EditOp[];
 export declare function carryFocus(requests: PlanRequest[], world: WorldState, ops: EditOp[]): EditOp[];
 export declare function landReply(requests: PlanRequest[], ops: EditOp[]): string | null;
 export declare function supplementLand(requests: PlanRequest[], world: WorldState, chosen: EditOp[]): EditOp[];
+export declare function spreadReply(requests: PlanRequest[], ops: EditOp[]): string | null;
 export declare function carrySpot(requests: PlanRequest[], world: WorldState, ops: EditOp[]): EditOp[];
 export declare function carryInterior(requests: PlanRequest[], world: WorldState, ops: EditOp[]): EditOp[];
 export declare function supplementProps(requests: PlanRequest[], chosen: EditOp[], local: EditOp[]): EditOp[];

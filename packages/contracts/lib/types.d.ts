@@ -25,6 +25,11 @@ export declare const SKIES: readonly ["day", "night"];
 export type Sky = (typeof SKIES)[number];
 /** Surface height in world units. Water is the basin and stone is the hill. */
 export declare const TERRAIN_HEIGHT: Record<Terrain, number>;
+/** Extra steps a hill can rise above its terrain. Each step is HILL_STEP world units. */
+export declare const HILL_MAX = 4;
+export declare const HILL_STEP = 0.72;
+/** Floors a building can have, including the ground floor. */
+export declare const STORY_MAX = 6;
 export declare const ENTITY_KINDS: readonly ["tree", "house", "tower", "castle", "bridge", "road", "rock", "flower", "campfire", "boat", "npc", "sign", "custom"];
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 export declare function canEnter(entity: {
@@ -41,6 +46,8 @@ export interface Entity {
     label: string;
     note?: string;
     model?: string;
+    /** Floors including the ground floor. Missing means one story. */
+    stories?: number;
     inside?: string;
     createdBy: string;
 }
@@ -66,6 +73,8 @@ export interface WorldState {
     version: number;
     sky?: Sky;
     terrain: Terrain[][];
+    /** Extra hill height per cell, same shape as terrain. Missing cells are flat. */
+    rise?: number[][];
     entities: Entity[];
     players: Player[];
     chat: ChatMessage[];
@@ -92,6 +101,13 @@ export type EditOp = {
     w: number;
     h: number;
     terrain: Terrain;
+} | {
+    op: "raise";
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    by: number;
 } | {
     op: "sky";
     value: Sky;
@@ -128,6 +144,7 @@ export type EditOp = {
     sprite?: SpriteId;
     note?: string;
     model?: string;
+    stories?: number;
 };
 export interface EditBatch {
     requestIds: string[];
@@ -156,6 +173,7 @@ export interface EditsPayload {
     version: number;
     sky?: Sky;
     terrain: Terrain[][];
+    rise?: number[][];
     entities: Entity[];
     message: ChatMessage;
     rejected: {

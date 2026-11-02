@@ -306,6 +306,43 @@ export class WorldRoom {
     };
   }
 
+  remove(id: string): { ok: boolean; reason?: string } {
+    const world = this.require();
+    const entity = world.entities.find((item) => item.id === id);
+    if (!entity) return { ok: false, reason: "that is not on the map" };
+    const result = applyOps(world, [{ op: "remove", id }]);
+    if (result.applied.length === 0) return { ok: false, reason: result.rejected[0]?.reason ?? "that could not be removed" };
+    this.world = result.world;
+    this.world.version += 1;
+    for (const player of this.world.players) {
+      if (player.inside !== id) continue;
+      player.inside = undefined;
+      this.emit("player_joined", { player: { ...player } });
+    }
+    const previous = this.world.chat.at(-1);
+    const message: ChatMessage = previous ?? {
+      id: this.nextId("msg"),
+      seq: this.seq,
+      at: new Date().toISOString(),
+      from: "Director",
+      role: "agent",
+      text: "",
+    };
+    this.emit("edits", {
+      version: this.world.version,
+      sky: this.world.sky ?? "day",
+      terrain: this.world.terrain,
+      rise: this.world.rise,
+      entities: this.world.entities,
+      message,
+      rejected: [],
+      stale: false,
+      colors: [],
+      requestIds: [],
+    });
+    return { ok: true };
+  }
+
   relocate(id: string, x: number, y: number): { ok: boolean; reason?: string } {
     const world = this.require();
     const entity = world.entities.find((item) => item.id === id);
@@ -330,6 +367,7 @@ export class WorldRoom {
       version: this.world.version,
       sky: this.world.sky ?? "day",
       terrain: this.world.terrain,
+      rise: this.world.rise,
       entities: this.world.entities,
       message,
       rejected: [],
@@ -395,6 +433,7 @@ export class WorldRoom {
       version: this.world.version,
       sky: this.world.sky ?? "day",
       terrain: this.world.terrain,
+      rise: this.world.rise,
       entities: this.world.entities,
       message,
       rejected: result.rejected,

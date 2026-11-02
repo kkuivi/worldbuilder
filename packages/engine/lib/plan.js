@@ -1,4 +1,4 @@
-import { GRID_H, GRID_W, MAP_STEP, ROOM_H, ROOM_W, SPRITES, canEnter, colorWord, coloredNouns, animalNames, fitGrow, furnitureNames, inventModel, isFurniture, mapSize, portrayal, } from "@worldbuilder/contracts";
+import { GRID_H, GRID_W, HILL_MAX, MAP_STEP, STORY_MAX, ROOM_H, ROOM_W, SPRITES, canEnter, colorWord, coloredNouns, animalNames, fitGrow, furnitureNames, inventModel, isFurniture, mapSize, portrayal, } from "@worldbuilder/contracts";
 import { applyOps, placementError } from "./apply.js";
 const TAGS = [
     [/castle|fortress|keep|palace/, "castle"],
@@ -305,6 +305,101 @@ export function focusEdits(entity, text) {
         return [{ ...next, sprite }];
     return [next];
 }
+function isBuilding(entity) {
+    if (entity.inside)
+        return false;
+    if (entity.kind === "house" || entity.kind === "tower" || entity.kind === "castle")
+        return true;
+    return portrayal(entity.label) === "building";
+}
+function buildingTaller(text) {
+    const lower = text.toLowerCase();
+    const floors = /\b(stor(?:y|ies|ey|eys)|floors?)\b/.test(lower);
+    const lift = floors || /\b(taller|higher|raise|raised|lift)\b/.test(lower);
+    if (!lift)
+        return false;
+    if (/\b(hill|mountain|cliff|dunes?)\b/.test(lower) && !/\b(building|buildings|house|houses|tower|towers|castle|castles|cottage|cottages|barn|barns)\b/.test(lower))
+        return false;
+    if (floors)
+        return true;
+    return /\b(it|this|that|them|building|buildings|house|houses|tower|towers|castle|castles|cottage|cottages|barn|barns|shop|shops|store|stores)\b/.test(lower);
+}
+function storyTargets(world, request) {
+    if (!buildingTaller(request.text))
+        return [];
+    const lower = request.text.toLowerCase();
+    const focused = request.focus ? world.entities.find((entity) => entity.id === request.focus) : undefined;
+    if (focused && isBuilding(focused) && (/\b(stor(?:y|ies|ey|eys)|floors?)\b/.test(lower) || wantsFocusEdit(request.text, focused) || lower.includes(focused.label.toLowerCase()))) {
+        return [focused];
+    }
+    const named = world.entities.filter((entity) => isBuilding(entity) && entity.label.length > 2 && lower.includes(entity.label.toLowerCase()));
+    if (named.length)
+        return named;
+    const area = spotBox(request.spot, request.inside, world);
+    if (area) {
+        const inside = world.entities.filter((entity) => isBuilding(entity) && covers(entity, area.x, area.y, area.w, area.h));
+        if (inside.length)
+            return inside;
+    }
+    if (/\b(buildings|houses|towers|castles|cottages|barns)\b/.test(lower))
+        return world.entities.filter((entity) => isBuilding(entity));
+    const only = world.entities.filter((entity) => isBuilding(entity));
+    return only.length === 1 ? only : [];
+}
+function raiseStories(entity) {
+    const current = entity.stories ?? 1;
+    if (current >= STORY_MAX)
+        return null;
+    return { op: "update", id: entity.id, stories: current + 1 };
+}
+function onlyBuildingHeight(text, targets) {
+    if (!buildingTaller(text) || !targets.length)
+        return false;
+    let rest = text.toLowerCase();
+    for (const entity of targets)
+        rest = rest.replaceAll(entity.label.toLowerCase(), " ");
+    rest = rest
+        .replace(/\b(please|thanks|now|just|can|you|could|make|made|the|a|an|it|this|that|them|taller|higher|raise|raised|lift|another|add|give|story|stories|storey|storeys|floor|floors|building|buildings|house|houses|tower|towers|castle|castles|cottage|cottages|barn|barns|shop|shops|store|stores)\b/g, " ")
+        .replace(/[^a-z]+/g, " ")
+        .trim();
+    return rest.length === 0;
+}
+function storyReply(ops, capped) {
+    const raised = ops.filter((op) => op.op === "update" && op.stories !== undefined);
+    const bits = [];
+    if (raised.length === 1)
+        bits.push(`I added a story, so it is ${raised[0]?.stories} stories tall.`);
+    else if (raised.length > 1)
+        bits.push(`I added a story to ${raised.length} buildings.`);
+    if (capped.length === 1)
+        bits.push("That building is already as tall as it can be.");
+    else if (capped.length > 1)
+        bits.push("Those buildings are already as tall as they can be.");
+    return bits.join(" ");
+}
+export function supplementStories(requests, world, chosen) {
+    const seen = new Set(chosen.flatMap((op) => (op.op === "update" && op.stories !== undefined ? [op.id] : [])));
+    const extras = [];
+    const quiet = new Set();
+    for (const request of requests) {
+        const targets = storyTargets(world, request);
+        if (targets.length && onlyBuildingHeight(request.text, targets))
+            quiet.add(request.text.trim().toLowerCase().slice(0, 40));
+        for (const entity of targets) {
+            if (seen.has(entity.id))
+                continue;
+            const raised = raiseStories(entity);
+            if (!raised)
+                continue;
+            seen.add(entity.id);
+            extras.push(raised);
+        }
+    }
+    if (!extras.length && quiet.size === 0)
+        return chosen;
+    const next = chosen.filter((op) => !(op.op === "place" && op.sprite === "sign" && quiet.has(op.label.trim().toLowerCase())));
+    return [...next, ...extras].slice(0, 48);
+}
 function focusReply(ops) {
     const lines = ops.map((op) => {
         if (op.op === "remove")
@@ -490,7 +585,8 @@ function packInArea(world, area, request, prototypes, fill) {
     const loose = area.w === 1 || area.h === 1;
     const limitW = request.inside ? ROOM_W : mapSize(world).w;
     const limitH = request.inside ? ROOM_H : mapSize(world).h;
-    const seeds = prototypes.length ? prototypes : landscapeTerrain(request.text) ? [] : [stamp("prop", "Marker", area.x, area.y, request.inside)];
+    const named = askedProp(request.text);
+    const seeds = prototypes.length ? prototypes : landscapeTerrain(request.text) ? [] : [stamp("prop", named ?? "Marker", area.x, area.y, request.inside)];
     if (!seeds.length)
         return [];
     const copies = fill
@@ -545,6 +641,47 @@ function landscapeTerrain(text) {
 function duneWords(text) {
     return /\b(dunes?|desert)\b/i.test(text);
 }
+function hillTaller(text) {
+    const lower = text.toLowerCase();
+    if (!/\b(taller|higher|raise|raised|lift|steeper)\b/.test(lower))
+        return false;
+    return /\b(hill|mountain|cliff)\b/.test(lower);
+}
+function stoneBounds(world) {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < world.terrain.length; y += 1) {
+        for (let x = 0; x < (world.terrain[y]?.length ?? 0); x += 1) {
+            if (world.terrain[y]?.[x] !== "stone")
+                continue;
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+        }
+    }
+    if (maxX < 0)
+        return null;
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+function canRaise(world, area) {
+    for (let y = area.y; y < area.y + area.h; y += 1) {
+        for (let x = area.x; x < area.x + area.w; x += 1) {
+            if (world.terrain[y]?.[x] !== "stone")
+                return true;
+            if ((world.rise?.[y]?.[x] ?? 0) < HILL_MAX)
+                return true;
+        }
+    }
+    return false;
+}
+function raiseArea(world, area) {
+    if (!canRaise(world, area))
+        return null;
+    return { op: "raise", x: area.x, y: area.y, w: area.w, h: area.h, by: 1 };
+}
 function isPlaceholder(op) {
     if (op.op !== "place")
         return false;
@@ -572,7 +709,15 @@ function applyLandscape(requests, world, ops) {
     if (requests.length !== 1)
         return null;
     const request = requests[0];
-    if (!request?.spot || focusEntity(request, world) || !landscapeTerrain(request.text))
+    if (!request || focusEntity(request, world) || request.inside)
+        return null;
+    if (hillTaller(request.text)) {
+        const area = spotBox(request.spot, request.inside, world) ?? stoneBounds(world) ?? { x: 1, y: 1, w: 6, h: 3 };
+        const raise = raiseArea(world, area);
+        const kept = ops.filter((op) => op.op !== "paint" && op.op !== "raise" && !isPlaceholder(op) && !(op.op === "place" && op.sprite === "sign"));
+        return raise ? [...kept, raise] : kept;
+    }
+    if (!request.spot || !landscapeTerrain(request.text))
         return null;
     const paint = landscapePaint(request, world);
     if (!paint)
@@ -584,6 +729,12 @@ export function landReply(requests, ops) {
     if (requests.length !== 1)
         return null;
     const request = requests[0];
+    if (request && hillTaller(request.text)) {
+        if (ops.some((op) => op.op === "raise"))
+            return request.spot ? "I made the hill in that area taller." : "I made the hill taller.";
+        if (!ops.some((op) => op.op === "place" || op.op === "paint" || op.op === "remove"))
+            return "The hill is already as tall as it can be.";
+    }
     const terrain = request ? landscapeTerrain(request.text) : null;
     if (!request || !terrain)
         return null;
@@ -608,6 +759,14 @@ export function supplementLand(requests, world, chosen) {
     if (requests.length !== 1)
         return chosen;
     const request = requests[0];
+    if (request && hillTaller(request.text) && !request.inside && !focusEntity(request, world)) {
+        if (chosen.some((op) => op.op === "raise"))
+            return chosen.filter((op) => !isPlaceholder(op)).slice(0, 48);
+        const area = spotBox(request.spot, request.inside, world) ?? stoneBounds(world) ?? { x: 1, y: 1, w: 6, h: 3 };
+        const raise = raiseArea(world, area);
+        const next = chosen.filter((op) => op.op !== "paint" && !isPlaceholder(op) && !(op.op === "place" && op.sprite === "sign"));
+        return raise ? [...next, raise].slice(0, 48) : next.slice(0, 48);
+    }
     const terrain = request ? landscapeTerrain(request.text) : null;
     if (!request || !terrain || request.inside || focusEntity(request, world))
         return chosen;
@@ -628,7 +787,66 @@ export function supplementLand(requests, world, chosen) {
     const withoutTiny = next.filter((op) => !(op.op === "paint" && op.terrain === terrain));
     return [...paints, ...withoutTiny].slice(0, 48);
 }
+function askedProp(text) {
+    if (areaIntent(text) || landscapeTerrain(text) || hillTaller(text) || tagsFor(text).size > 0)
+        return null;
+    if (furnitureNames(text).length)
+        return null;
+    const lead = text.trim().match(/^(?:please\s+)?(?:add|place|put|build|lay|set|raise)\s+(.+)$/i);
+    const bare = text.trim().match(/^(?:some\s+|a\s+|an\s+|the\s+)?([a-z]{3,}(?:\s+[a-z]{3,}){0,2})$/i);
+    const raw = lead?.[1] ?? bare?.[1];
+    if (!raw)
+        return null;
+    const rest = raw
+        .replace(/^(?:me\s+|some\s+|a\s+|an\s+|the\s+|few\s+|several\s+)/i, "")
+        .replace(/\b(?:here|there|please)\b/gi, " ")
+        .replace(/[^a-z\s]/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const words = rest.split(" ").filter(Boolean);
+    if (!words.length || words.length > 3)
+        return null;
+    const bits = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+    const last = bits[bits.length - 1] ?? "";
+    if (last.length > 3 && /s$/i.test(last) && !/(?:ss|us)$/i.test(last))
+        bits[bits.length - 1] = last.slice(0, -1);
+    const label = bits.join(" ");
+    return label.length >= 3 ? label.slice(0, 40) : null;
+}
+function coversArea(text) {
+    return /\b(rafters|beams|joists|planks|boards|logs|tiles|slats|posts)\b/i.test(text);
+}
+function spreadProps(world, area, request, label) {
+    const stride = area.h >= 3 ? 2 : 1;
+    const spots = [];
+    for (let y = area.y; y < area.y + area.h && spots.length < 16; y += stride) {
+        for (let x = area.x; x < area.x + area.w && spots.length < 16; x += 1)
+            spots.push({ x, y, w: 1, h: 1 });
+    }
+    if (!spots.length)
+        return [];
+    const placed = spots.map((spot) => stamp("prop", label, spot.x, spot.y, request.inside));
+    return [...prepareFootprints(world, spots, request.inside, null), ...placed];
+}
+export function spreadReply(requests, ops) {
+    if (requests.length !== 1)
+        return null;
+    const request = requests[0];
+    const named = request ? askedProp(request.text) : null;
+    if (!request || !named || !coversArea(request.text))
+        return null;
+    const count = ops.filter((op) => op.op === "place" && op.label === named).length;
+    if (count < 2)
+        return null;
+    const word = request.text.match(/\b(rafters|beams|joists|planks|boards|logs|tiles|slats|posts)\b/i)?.[1]?.toLowerCase() ?? `${named.toLowerCase()}s`;
+    return `I raised ${word} across the area you selected.`;
+}
 function fitRequestToArea(ops, request, world, area, only) {
+    const named = askedProp(request.text);
+    if (named && coversArea(request.text) && area.w * area.h > 1) {
+        const kept = ops.filter((op) => op.op !== "place");
+        return [...kept, ...spreadProps(world, area, request, named)];
+    }
     const intent = areaIntent(request.text);
     const mine = (op) => (only && intent ? true : placeBelongs(request, op));
     const kept = [];
@@ -1017,7 +1235,24 @@ function openSpot(world, w, h, terrainOk) {
 const LAND = new Set(["grass", "sand", "snow", "dirt", "stone"]);
 export function planBatch(world, incoming) {
     const direct = [];
+    const capped = [];
     const requests = incoming.filter((request) => {
+        if (buildingTaller(request.text)) {
+            const targets = storyTargets(world, request);
+            if (targets.length) {
+                for (const entity of targets) {
+                    if (direct.some((op) => op.op === "update" && op.id === entity.id && op.stories !== undefined))
+                        continue;
+                    const raised = raiseStories(entity);
+                    if (raised)
+                        direct.push(raised);
+                    else if (!capped.includes(entity.label))
+                        capped.push(entity.label);
+                }
+                if (onlyBuildingHeight(request.text, targets))
+                    return false;
+            }
+        }
         const entity = focusEntity(request, world);
         if (!entity)
             return true;
@@ -1034,7 +1269,7 @@ export function planBatch(world, incoming) {
                 requestIds: incoming.map((request) => request.id),
                 baseVersion: world.version,
                 ops: direct.slice(0, 48),
-                reply: focusReply(direct),
+                reply: [storyReply(direct, capped), focusReply(direct)].filter(Boolean).join(" ") || "I left the map as it was.",
             },
             lines: [{ from: "Director", text: `Changing what ${everyone} selected.` }],
         };
@@ -1087,8 +1322,18 @@ export function planBatch(world, incoming) {
             paintRect(terrainOps, 0, Math.max(0, span.h - 2), span.w, 2, "water", span);
         }
     }
-    if (allTags.has("hill"))
-        paintRect(terrainOps, 1, 1, 6, 3, "stone");
+    if (allTags.has("hill")) {
+        const lifting = requests.find((request) => hillTaller(request.text));
+        if (lifting) {
+            const area = spotBox(lifting.spot, lifting.inside, world) ?? stoneBounds(world) ?? { x: 1, y: 1, w: 6, h: 3 };
+            const raise = raiseArea(world, area);
+            if (raise)
+                terrainOps.push(raise);
+        }
+        else {
+            paintRect(terrainOps, 1, 1, 6, 3, "stone");
+        }
+    }
     if (!wantMoat && allTags.has("river")) {
         const mid = Math.floor(span.h / 2);
         paintRect(terrainOps, 0, Math.max(0, mid - 1), span.w, 1, "sand", span);
@@ -1222,9 +1467,14 @@ export function planBatch(world, incoming) {
     }
     if (terrainOps.length + buildOps.length + storyOps.length === 0) {
         for (const request of requests) {
+            if (hillTaller(request.text) || onlyBuildingHeight(request.text, storyTargets(world, request)))
+                continue;
             const text = request.text.trim().replace(/\s+/g, " ");
-            const label = text.slice(0, 40) || "Note";
-            addPlace(world, storyOps, "sign", label, text.slice(0, 160) || undefined, (terrain) => LAND.has(terrain));
+            const named = askedProp(text);
+            if (named)
+                addPlace(world, storyOps, "prop", named, undefined, (terrain) => LAND.has(terrain));
+            else
+                addPlace(world, storyOps, "sign", text.slice(0, 40) || "Note", text.slice(0, 160) || undefined, (terrain) => LAND.has(terrain));
         }
     }
     const sky = skyAsk(requests);
@@ -1238,7 +1488,7 @@ export function planBatch(world, incoming) {
         const area = spotBox(request.spot, request.inside, world);
         return area != null && area.w * area.h > 1;
     });
-    const reply = landReply(incoming, ops) ?? [focusReply(direct), replyFor({
+    const reply = landReply(incoming, ops) ?? spreadReply(incoming, ops) ?? [storyReply(direct, capped), focusReply(direct), replyFor({
             wantMoat,
             wantShore,
             castlePeople,

@@ -45,6 +45,10 @@ export declare class WorldRoom {
         message: ChatMessage;
     };
     claimBatch(workerId: string, now?: number): ClaimedBatch | null;
+    remove(id: string): {
+        ok: boolean;
+        reason?: string;
+    };
     relocate(id: string, x: number, y: number): {
         ok: boolean;
         reason?: string;

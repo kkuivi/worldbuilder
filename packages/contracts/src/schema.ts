@@ -1,10 +1,15 @@
 import { z } from "zod";
 import { SPRITE_IDS } from "./sprites.js";
-import { ENTITY_KINDS, MAP_MAX_H, MAP_MAX_W, SKIES, TERRAINS } from "./types.js";
+import { ENTITY_KINDS, MAP_MAX_H, MAP_MAX_W, SKIES, STORY_MAX, TERRAINS } from "./types.js";
 
 const modelField = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-  z.string().trim().min(1).max(700).optional(),
+  z.string().trim().min(1).max(1200).optional(),
+);
+
+const optionalId = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).max(40).optional(),
 );
 
 export const terrainSchema = z.enum(TERRAINS);
@@ -20,6 +25,14 @@ export const editOpSchema = z.discriminatedUnion("op", [
     w: z.number().int().positive().max(MAP_MAX_W),
     h: z.number().int().positive().max(MAP_MAX_H),
     terrain: terrainSchema,
+  }),
+  z.object({
+    op: z.literal("raise"),
+    x: z.number().int(),
+    y: z.number().int(),
+    w: z.number().int().positive().max(MAP_MAX_W),
+    h: z.number().int().positive().max(MAP_MAX_H),
+    by: z.number().int().min(1).max(3),
   }),
   z.object({
     op: z.literal("sky"),
@@ -43,7 +56,7 @@ export const editOpSchema = z.discriminatedUnion("op", [
     label: z.string().trim().min(1).max(40),
     note: z.string().trim().max(160).optional(),
     model: modelField,
-    inside: z.string().trim().min(1).max(40).optional(),
+    inside: optionalId,
   }),
   z.object({
     op: z.literal("move"),
@@ -62,6 +75,7 @@ export const editOpSchema = z.discriminatedUnion("op", [
     sprite: spriteIdSchema.optional(),
     note: z.string().trim().max(160).optional(),
     model: modelField,
+    stories: z.number().int().min(1).max(STORY_MAX).optional(),
   }),
 ]);
 
